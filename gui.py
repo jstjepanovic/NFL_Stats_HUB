@@ -9,7 +9,7 @@ def create_standings_tables(divisions):
     with dpg.group(horizontal=True):
         # AFC Conference (Left side)
         with dpg.child_window(width=400, height=600):
-            dpg.add_text("American Football Conference", color=(255, 0, 0))
+            dpg.add_text("American Football Conference", color=(204, 16, 16))
             afc_divisions = {k: v for k, v in divisions.items() if k.startswith('AFC')}
             for div_name, teams in sorted(afc_divisions.items()):
                 with dpg.collapsing_header(label=div_name, default_open=True):
@@ -21,11 +21,11 @@ def create_standings_tables(divisions):
                                  borders_outerV=True,
                                  policy=dpg.mvTable_SizingFixedFit):
                         
-                        dpg.add_table_column(label="Team", width=150)
+                        dpg.add_table_column(label="Team", width=200)
                         dpg.add_table_column(label="W", width=40)
                         dpg.add_table_column(label="L", width=40)
                         dpg.add_table_column(label="T", width=40)
-                        dpg.add_table_column(label="Win%", width=70)
+                        dpg.add_table_column(label="Win%", width=60)
                         
                         sorted_teams = sort_teams(teams)
                         for idx, team in enumerate(sorted_teams):
@@ -38,7 +38,7 @@ def create_standings_tables(divisions):
         
         # NFC Conference (Right side)
         with dpg.child_window(width=400, height=600):
-            dpg.add_text("National Football Conference", color=(0, 0, 255))
+            dpg.add_text("National Football Conference", color=(44, 117, 219))
             nfc_divisions = {k: v for k, v in divisions.items() if k.startswith('NFC')}
             for div_name, teams in sorted(nfc_divisions.items()):
                 with dpg.collapsing_header(label=div_name, default_open=True):
@@ -50,11 +50,11 @@ def create_standings_tables(divisions):
                                     borders_outerV=True,
                                     policy=dpg.mvTable_SizingFixedFit):
                         
-                        dpg.add_table_column(label="Team", width=150)
+                        dpg.add_table_column(label="Team", width=200)
                         dpg.add_table_column(label="W", width=40)
                         dpg.add_table_column(label="L", width=40)
                         dpg.add_table_column(label="T", width=40)
-                        dpg.add_table_column(label="Win%", width=70)
+                        dpg.add_table_column(label="Win%", width=60)
                         
                         sorted_teams = sort_teams(teams)
                         for idx, team in enumerate(sorted_teams):

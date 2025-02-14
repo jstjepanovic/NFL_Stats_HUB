@@ -2,7 +2,17 @@ from typing import Dict, List, Any
 import aiohttp
 import asyncio
 
-async def fetch_stats_leaders(year: str) -> Dict[str, List[Dict[str, Any]]]:
+STAT_CATEGORIES = {
+    'passingYards': 'Passing Yards',
+    'rushingYards': 'Rushing Yards',
+    'receivingYards': 'Receiving Yards',
+    'sacks': 'Sacks',
+    'interceptions': 'Interceptions',
+    'passingTouchdowns': 'Passing TDs',
+    'receptions': 'Receptions'
+}
+
+async def fetch_stats_leaders(year: str, no_of_players: int = 5) -> Dict[str, List[Dict[str, Any]]]:
     """
     Fetch NFL stats leaders for different categories.
     
@@ -21,10 +31,15 @@ async def fetch_stats_leaders(year: str) -> Dict[str, List[Dict[str, Any]]]:
             leaders: Dict[str, List[Dict[str, Any]]] = {}
             
             for category in data['categories']:
+                if category['name'] not in STAT_CATEGORIES:
+                    continue
+
                 category_name = category['name']
                 leaders[category_name] = []
                 
                 for i, leader in enumerate(category['leaders']):
+                    if i >= no_of_players:
+                        break
                     # Get athlete details
                     async with session.get(leader['athlete']['$ref']) as athlete_response:
                         athlete_data = await athlete_response.json()
@@ -37,8 +52,6 @@ async def fetch_stats_leaders(year: str) -> Dict[str, List[Dict[str, Any]]]:
                             'rank': i + 1
                         }
                         leaders[category_name].append(leader_info)
-                        if (i == 4):
-                            break
             
             return leaders
 

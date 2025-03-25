@@ -9,6 +9,7 @@ from functools import wraps
 from typing import Dict, List, Any
 
 from standings import update_standings
+from stats_leaders import fetch_stats_leaders, STAT_CATEGORIES
 
 class CSVHandler(ABC):
     @abstractmethod
@@ -65,28 +66,41 @@ class NFLStatsApp:
         self.root.attributes('-fullscreen', True)
         self.root.bind('<Escape>', lambda _: self.root.attributes('-fullscreen', False))
         
-        # Store current data
         self.current_standings = {}
         
-        # Set up UI
         self.setup_ui()
         
-        # Initialize asyncio loop in a separate thread
         self.loop = asyncio.new_event_loop()
         self.thread = threading.Thread(target=self.start_background_loop, daemon=True)
         self.thread.start()
         
-        # Schedule initial data fetch
         self.root.after(100, self.initial_data_fetch)
         
-        # Set up periodic refresh (every 5 minutes)
         self.root.after(600000, self.schedule_refresh)
     
+        self.stats_loaded = False
+
     def setup_ui(self):
         # Create main frame
         self.main_frame = ttk.Frame(self.root, padding="10")
         self.main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Create year selection frame first
+        self.year_frame = ttk.Frame(self.main_frame)
+        self.year_frame.pack(fill=tk.X, padx=10, pady=5)
         
+        # Add year selection label
+        year_label = ttk.Label(self.year_frame, text="Select Year:")
+        year_label.pack(side=tk.LEFT, padx=5)
+        
+        # Add year selection dropdown
+        current_year = datetime.now().year
+        years = [str(year) for year in range(2004, current_year)]
+        self.year_var = tk.StringVar()
+        self.year_dropdown = ttk.Combobox(self.year_frame, textvariable=self.year_var, values=years)
+        self.year_dropdown.set(str(current_year - 1))
+        self.year_dropdown.pack(side=tk.LEFT, padx=5)
+
         # Create tabs
         self.tab_control = ttk.Notebook(self.main_frame)
         
@@ -99,16 +113,55 @@ class NFLStatsApp:
         self.tab_control.add(self.player_stats_tab, text="Player Stats")
         
         self.tab_control.pack(fill=tk.BOTH, expand=True)
+
+        # Bind events after creating components
+        self.tab_control.bind('<<NotebookTabChanged>>', self.on_tab_change)
+        self.year_dropdown.bind("<<ComboboxSelected>>", self.on_year_change)
         
         # Setup each tab
         self.setup_standings_tab()
         self.setup_player_stats_tab()
-        
+
         # Status bar
         self.status_var = tk.StringVar()
         self.status_var.set("Ready")
         self.status_bar = ttk.Label(self.root, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W)
         self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+
+    def on_year_change(self, event):
+        selected_year = self.year_var.get()
+        
+        current_tab = self.tab_control.index(self.tab_control.select())
+        if current_tab == 0:
+            self.refresh_standings(selected_year)
+        elif current_tab == 1:
+            selected_category_tab = self.stats_notebook.index(self.stats_notebook.select())
+            categories = list(STAT_CATEGORIES.keys())
+            if selected_category_tab < len(categories):
+                self.refresh_player_stats(categories[selected_category_tab], selected_year)
+
+    def on_tab_change(self, event):
+        current_tab = self.tab_control.index(self.tab_control.select())
+        
+        if current_tab == 1:
+            selected_category_tab = self.stats_notebook.index(self.stats_notebook.select())
+            categories = list(STAT_CATEGORIES.keys())
+            
+            selected_year = self.year_var.get()
+
+            if selected_category_tab < len(categories):
+                self.refresh_player_stats(categories[selected_category_tab], selected_year)
+
+    def on_stats_tab_change(self, event):
+        # Get the currently selected category tab
+        selected_category_tab = self.stats_notebook.index(self.stats_notebook.select())
+        categories = list(STAT_CATEGORIES.keys())
+        
+        selected_year = self.year_var.get()
+
+        if selected_category_tab < len(categories):
+            self.refresh_player_stats(categories[selected_category_tab], selected_year)
+
     
     def setup_standings_tab(self):
         # Frame for standings
@@ -162,10 +215,85 @@ class NFLStatsApp:
 
     
     def setup_player_stats_tab(self):
-        # Placeholder for player stats tab
-        # This will be implemented later
-        label = ttk.Label(self.player_stats_tab, text="Player stats will be displayed here")
-        label.pack(pady=20)
+    # Create a notebook for different stat categories
+        self.stats_notebook = ttk.Notebook(self.player_stats_tab)
+        self.stats_notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Create frames for each stat category
+        self.stat_frames = {}
+        self.stat_trees = {}
+        
+        # Define stat categories to display
+        categories = [
+            'passingYards', 'rushingYards', 'receivingYards', 
+            'sacks', 'interceptions', 'passingTouchdowns', 'receptions'
+        ]
+        
+        # Create a tab and treeview for each category
+        for category in categories:
+            # Create frame
+            frame = ttk.Frame(self.stats_notebook)
+            self.stat_frames[category] = frame
+            
+            # Add to notebook with display name
+            display_name = STAT_CATEGORIES[category]
+            self.stats_notebook.add(frame, text=display_name)
+            
+            # Create treeview for this category
+            columns = ("Rank", "Player", "Position", "Team", "Value")
+            tree = ttk.Treeview(frame, columns=columns, show="headings")
+            
+            # Configure columns
+            tree.heading("Rank", text="Rank")
+            tree.heading("Player", text="Player")
+            tree.heading("Position", text="Pos")
+            tree.heading("Team", text="Team")
+            tree.heading("Value", text=display_name)
+            
+            tree.column("Rank", width=50, anchor=tk.CENTER)
+            tree.column("Player", width=150, anchor=tk.W)
+            tree.column("Position", width=50, anchor=tk.CENTER)
+            tree.column("Team", width=100, anchor=tk.CENTER)
+            tree.column("Value", width=100, anchor=tk.CENTER)
+            
+            # Add scrollbar
+            scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=tree.yview)
+            tree.configure(yscrollcommand=scrollbar.set)
+            
+            # Pack widgets
+            tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+            
+            # Store reference to tree
+            self.stat_trees[category] = tree
+            
+            # Add player click event
+            tree.bind("<Double-1>", lambda e, cat=category: self.on_player_click(e, cat))
+        
+        # Control frame
+        control_frame = ttk.Frame(self.player_stats_tab)
+        control_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        # Refresh button
+        selected_category_tab = self.stats_notebook.index(self.stats_notebook.select())
+        categories = list(STAT_CATEGORIES.keys())
+        selected_year = self.year_var.get()
+        refresh_btn = ttk.Button(control_frame, text="Refresh Stats", command=lambda: self.refresh_player_stats(selected_year, categories[selected_category_tab]))
+        refresh_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Export button
+        export_btn = ttk.Button(control_frame, text="Export to CSV",
+                            command=lambda: asyncio.run_coroutine_threadsafe(self.export_player_stats_to_csv(), self.loop))
+        export_btn.pack(side=tk.LEFT, padx=5)
+        
+        self.stats_notebook.bind("<<NotebookTabChanged>>", self.on_stats_tab_change)
+
+        # Last updated label
+        self.player_stats_updated_var = tk.StringVar()
+        self.player_stats_updated_var.set("Last updated: Never")
+        updated_label = ttk.Label(control_frame, textvariable=self.player_stats_updated_var)
+        updated_label.pack(side=tk.RIGHT, padx=5)
+
     
     def start_background_loop(self):
         asyncio.set_event_loop(self.loop)
@@ -175,23 +303,29 @@ class NFLStatsApp:
         self.status_var.set("Fetching initial data...")
         # Fetch standings
         asyncio.run_coroutine_threadsafe(self.fetch_and_display_standings(), self.loop)
+
     
     def schedule_refresh(self):
-        # Schedule next refresh
         self.root.after(300000, self.schedule_refresh)
-        # Refresh data based on active tab
         current_tab = self.tab_control.index(self.tab_control.select())
-        if current_tab == 0:  # Standings tab
+        if current_tab == 0:
             self.refresh_standings()
+        elif current_tab == 1:
+            selected_category_tab = self.stats_notebook.index(self.stats_notebook.select())
+            categories = list(STAT_CATEGORIES.keys())
+            selected_year = self.year_var.get()
+
+            if selected_category_tab < len(categories):
+                self.refresh_player_stats(selected_year, categories[selected_category_tab])
     
-    def refresh_standings(self):
+    def refresh_standings(self, year: str | None = None):
         self.status_var.set("Refreshing standings...")
-        asyncio.run_coroutine_threadsafe(self.fetch_and_display_standings(), self.loop)
+        asyncio.run_coroutine_threadsafe(self.fetch_and_display_standings(year), self.loop)
     
     @log_operation
-    async def fetch_and_display_standings(self):
+    async def fetch_and_display_standings(self, year: str | None = None):
         try:
-            standings_data = await update_standings()
+            standings_data = await update_standings(year)
             self.current_standings = standings_data
             
             self.root.after(0, lambda: self.update_standings_ui(standings_data))
@@ -308,6 +442,142 @@ class NFLStatsApp:
         
         # Add a button to close the window
         ttk.Button(details_window, text="Close", command=details_window.destroy).pack(pady=20)
+
+    def refresh_player_stats(self, category: str, year: str | None = None):
+        self.status_var.set(f"Loading {STAT_CATEGORIES[category]} data...")
+        asyncio.run_coroutine_threadsafe(self.fetch_and_display_player_stats(year, category), self.loop)
+
+    @log_operation
+    async def fetch_and_display_player_stats(self, year: str | None, category: str):
+        try:
+            # Fetch player stats for just this category
+            stats_data = await fetch_stats_leaders(year, category)
+            
+            # Store in the current player stats dictionary
+            if not hasattr(self, 'current_player_stats'):
+                self.current_player_stats = {}
+            
+            # Update only the requested category
+            if category in stats_data:
+                self.current_player_stats[category] = stats_data[category]
+            
+            # Update UI for just this category
+            self.root.after(0, lambda: self.update_player_stats_category_ui(category, stats_data.get(category, [])))
+            
+            # Update status
+            self.root.after(0, lambda: self.status_var.set(f"{STAT_CATEGORIES[category]} data updated successfully"))
+            
+            # Update last updated time
+            now = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
+            self.root.after(0, lambda: self.player_stats_updated_var.set(f"Last updated: {now}"))
+            
+        except Exception as e:
+            self.root.after(0, lambda: self.status_var.set(f"Error updating {STAT_CATEGORIES[category]} data: {str(e)}"))
+
+    def update_player_stats_category_ui(self, category, players):
+        if category not in self.stat_trees:
+            return
+            
+        tree = self.stat_trees[category]
+        
+        # Clear existing data
+        for item in tree.get_children():
+            tree.delete(item)
+        
+        # Insert player data
+        for player in players:
+            tree.insert(
+                "", 
+                "end", 
+                values=(
+                    player['rank'],
+                    player['name'],
+                    player['position'],
+                    player['team_abbr'],
+                    player['value']
+                ),
+                tags=(str(player['athlete_id']),)
+            )
+
+    def on_player_click(self, event, category):
+        # Get selected item
+        tree = self.stat_trees[category]
+        item_id = tree.identify('item', event.x, event.y)
+        if not item_id:
+            return
+        
+        # Get athlete ID from tags
+        athlete_id = tree.item(item_id, "tags")[0]
+        
+        # Find player data
+        player_data = None
+        for player in self.current_player_stats.get(category, []):
+            if str(player['athlete_id']) == athlete_id:
+                player_data = player
+                break
+        
+        if player_data:
+            self.show_player_details(player_data)
+
+    def show_player_details(self, player_data):
+        # Create a new window for player details
+        details_window = tk.Toplevel(self.root)
+        details_window.title(f"{player_data['name']} Details")
+        details_window.geometry("600x400")
+        
+        # Add player info
+        ttk.Label(details_window, text=f"{player_data['name']}", 
+                font=("Arial", 16, "bold")).pack(pady=10)
+        
+        ttk.Label(details_window, text=f"Position: {player_data['position']}").pack(anchor="w", padx=20)
+        ttk.Label(details_window, text=f"Team: {player_data['team']}").pack(anchor="w", padx=20)
+        
+        # Add stat value
+        ttk.Label(details_window, text=f"Value: {player_data['value']}").pack(anchor="w", padx=20)
+        
+        # Add a button to close the window
+        ttk.Button(details_window, text="Close", command=details_window.destroy).pack(pady=20)
+
+    @validate_data
+    async def export_player_stats_to_csv(self):
+        if not hasattr(self, 'current_player_stats') or not self.current_player_stats:
+            self.root.after(0, lambda: messagebox.showinfo("Export", "No player stats data to export"))
+            return
+        
+        # Get current tab/category
+        current_tab = self.stats_notebook.index(self.stats_notebook.select())
+        categories = list(STAT_CATEGORIES.keys())
+        if current_tab >= len(categories):
+            self.root.after(0, lambda: messagebox.showinfo("Export", "Please select a stat category"))
+            return
+        
+        current_category = categories[current_tab]
+        players = self.current_player_stats.get(current_category, [])
+        
+        if not players:
+            self.root.after(0, lambda: messagebox.showinfo("Export", "No data to export for this category"))
+            return
+        
+        # Ask for save location - must be done in the main thread
+        filename_future = asyncio.Future()
+        self.root.after(0, lambda: self._get_save_filename(filename_future, f"NFL_{STAT_CATEGORIES[current_category]}_Leaders"))
+        
+        # Wait for the filename
+        filename = await filename_future
+        
+        if not filename:
+            return
+        
+        # Create CSV handler and save
+        csv_handler = NFLDataCSVHandler()
+        success = await csv_handler.save_to_csv(players, filename)
+        
+        # Show result message in the main thread
+        if success:
+            self.root.after(0, lambda: messagebox.showinfo("Export", "Data exported successfully"))
+        else:
+            self.root.after(0, lambda: messagebox.showerror("Export Error", "Failed to export data"))
+
     
     @validate_data
     async def export_standings_to_csv(self):
@@ -345,12 +615,13 @@ class NFLStatsApp:
         else:
             self.root.after(0, lambda: messagebox.showerror("Export Error", "Failed to export data"))
 
-    def _get_save_filename(self, future):
+    def _get_save_filename(self, future, default_name="NFL_Stats"):
         """Helper method to get filename from dialog and set the future result"""
         filename = filedialog.asksaveasfilename(
             defaultextension=".csv",
             filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
-            title="Save Standings Data"
+            title="Save Standings Data",
+            initialfile=default_name
         )
         future.set_result(filename)
 

@@ -7,6 +7,8 @@ import csv
 from abc import ABC, abstractmethod
 from functools import wraps
 from typing import Dict, List, Any
+from PIL import Image, ImageTk
+from io import BytesIO
 
 from standings import update_standings
 from stats_leaders import fetch_stats_leaders, STAT_CATEGORIES
@@ -21,10 +23,8 @@ class NFLDataCSVHandler(CSVHandler):
         try:
             with open(filename, 'w', newline='') as file:
                 writer = csv.writer(file)
-                # Write header
                 if data and len(data) > 0:
                     writer.writerow(data[0].keys())
-                    # Write data rows
                     for row in data:
                         writer.writerow(row.values())
             return True
@@ -63,7 +63,6 @@ class NFLStatsApp:
         self.root = root
         self.root.title("NFL STATS HUB")
         self.root.geometry("1200x800")
-        self.root.attributes('-fullscreen', True)
         self.root.bind('<Escape>', lambda _: self.root.attributes('-fullscreen', False))
         
         self.current_standings = {}
@@ -94,10 +93,17 @@ class NFLStatsApp:
         year_label.pack(side=tk.LEFT, padx=5)
         
         # Add year selection dropdown
+        style = ttk.Style()
+        style.map('Custom.TCombobox',
+            fieldbackground=[('readonly', 'white')],
+            selectbackground=[('readonly', 'white')],
+            selectforeground=[('readonly', 'black')])
+    
         current_year = datetime.now().year
         years = [str(year) for year in range(2004, current_year)]
         self.year_var = tk.StringVar()
-        self.year_dropdown = ttk.Combobox(self.year_frame, textvariable=self.year_var, values=years)
+        self.year_dropdown = ttk.Combobox(self.year_frame, textvariable=self.year_var, 
+                                    values=years, style='Custom.TCombobox', state='readonly')
         self.year_dropdown.set(str(current_year - 1))
         self.year_dropdown.pack(side=tk.LEFT, padx=5)
 
@@ -140,27 +146,30 @@ class NFLStatsApp:
             if selected_category_tab < len(categories):
                 self.refresh_player_stats(categories[selected_category_tab], selected_year)
 
+        self._last_selected_year = selected_year
+
     def on_tab_change(self, event):
         current_tab = self.tab_control.index(self.tab_control.select())
-        
-        if current_tab == 1:
+        selected_year = self.year_var.get()
+    
+        if current_tab == 0:
+            self.refresh_standings(selected_year)
+        elif current_tab == 1:
             selected_category_tab = self.stats_notebook.index(self.stats_notebook.select())
             categories = list(STAT_CATEGORIES.keys())
             
-            selected_year = self.year_var.get()
-
             if selected_category_tab < len(categories):
-                self.refresh_player_stats(categories[selected_category_tab], selected_year)
+                category = categories[selected_category_tab]
+                self.refresh_player_stats(category, selected_year)
 
     def on_stats_tab_change(self, event):
-        # Get the currently selected category tab
         selected_category_tab = self.stats_notebook.index(self.stats_notebook.select())
         categories = list(STAT_CATEGORIES.keys())
-        
         selected_year = self.year_var.get()
 
         if selected_category_tab < len(categories):
-            self.refresh_player_stats(categories[selected_category_tab], selected_year)
+            category = categories[selected_category_tab]
+            self.refresh_player_stats(category, selected_year)
 
     
     def setup_standings_tab(self):
@@ -344,6 +353,9 @@ class NFLStatsApp:
         for item in self.standings_tree.get_children():
             self.standings_tree.delete(item)
         
+        CONFERENCE_ORDER = ['AFC', 'NFC']
+        DIVISION_ORDER = ['North', 'South', 'East', 'West']
+        
         # Group teams by conference and division
         conferences = {}
         for division_name, teams in standings_data.items():
@@ -357,19 +369,27 @@ class NFLStatsApp:
                 
                 conferences[conference][division_name].append(team)
         
-        # Insert conference headers, then divisions, then teams
-        for conference_name, divisions in conferences.items():
+        # Insert conference headers, then divisions, then teams in fixed order
+        for conference_name in CONFERENCE_ORDER:
+            if conference_name not in conferences:
+                continue
+            
             # Add conference header
             conference_id = self.standings_tree.insert("", "end", text=conference_name, 
                                                     values=("", "", "", "", "", "", ""))
             
-            # Add divisions under conference
-            for division_name, teams in divisions.items():
+            # Add divisions under conference in fixed order
+            for division_suffix in DIVISION_ORDER:
+                division_name = f"{conference_name} {division_suffix}"
+                if division_name not in conferences[conference_name]:
+                    continue
+                
                 # Add division header
                 division_id = self.standings_tree.insert(conference_id, "end", text=division_name, 
                                                         values=("", "", "", "", "", "", ""))
                 
                 # Sort teams by wins and win percentage
+                teams = conferences[conference_name][division_name]
                 sorted_teams = sorted(teams, key=lambda x: (-x['wins'], -x['winPercent']))
                 
                 # Add teams under division
@@ -392,6 +412,7 @@ class NFLStatsApp:
                     # Store team data in the tree item
                     self.standings_tree.item(team_id, tags=(team['abbreviation'],))
 
+        # Expand all items
         for conference_id in self.standings_tree.get_children():
             self.standings_tree.item(conference_id, open=True)
             for division_id in self.standings_tree.get_children(conference_id):
@@ -427,21 +448,42 @@ class NFLStatsApp:
             self.show_team_details(team_data)
     
     def show_team_details(self, team_data):
-        # Create a new window for team details
+         # Create a new window for team details
         details_window = tk.Toplevel(self.root)
         details_window.title(f"{team_data['name']} Details")
-        details_window.geometry("400x300")
+        details_window.geometry("500x350")
+        
+        # Create a frame for the logo and info
+        top_frame = ttk.Frame(details_window)
+        top_frame.pack(fill=tk.X, padx=20, pady=10)
+        
+        # Create a clickable placeholder for the logo
+        logo_frame = ttk.Frame(top_frame, width=100, height=100, relief=tk.GROOVE, borderwidth=2)
+        logo_frame.pack(side=tk.LEFT, padx=10)
+        logo_frame.pack_propagate(False)  # Prevent frame from shrinking
+        
+        # Add a label with instructions
+        logo_label = ttk.Label(logo_frame, text="Click to\nload logo", cursor="hand2")
+        logo_label.pack(expand=True, fill=tk.BOTH)
+        
+        # Bind click event to load the logo
+        # logo_url = f"https://a.espncdn.com/i/teamlogos/nfl/500/{team_data['abbreviation'].lower()}.png"
+        # logo_label.bind("<Button-1>", lambda e: self.load_team_logo(logo_frame, logo_url))
+        
+        # Create info frame
+        info_frame = ttk.Frame(top_frame)
+        info_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10)
         
         # Add team info
-        ttk.Label(details_window, text=f"{team_data['name']} ({team_data['abbreviation']})", 
-                 font=("Arial", 16, "bold")).pack(pady=10)
-        
-        ttk.Label(details_window, text=f"Conference: {team_data['conference']}").pack(anchor="w", padx=20)
-        ttk.Label(details_window, text=f"Division: {team_data['division']}").pack(anchor="w", padx=20)
-        ttk.Label(details_window, text=f"Record: {team_data['wins']}-{team_data['losses']}-{team_data['ties']} ({team_data['winPercent']:.3f})").pack(anchor="w", padx=20)
+        ttk.Label(info_frame, text=f"{team_data['name']} ({team_data['abbreviation']})",
+                font=("Arial", 16, "bold")).pack(anchor="w")
+        ttk.Label(info_frame, text=f"Conference: {team_data['conference']}").pack(anchor="w")
+        ttk.Label(info_frame, text=f"Division: {team_data['division']}").pack(anchor="w")
+        ttk.Label(info_frame, text=f"Record: {team_data['wins']}-{team_data['losses']}-{team_data['ties']} ({team_data['winPercent']:.3f})").pack(anchor="w")
         
         # Add a button to close the window
         ttk.Button(details_window, text="Close", command=details_window.destroy).pack(pady=20)
+
 
     def refresh_player_stats(self, category: str, year: str | None = None):
         self.status_var.set(f"Loading {STAT_CATEGORIES[category]} data...")
@@ -626,7 +668,10 @@ class NFLStatsApp:
         future.set_result(filename)
 
 
-# Run the application
+def run_asyncio_loop(loop):
+    asyncio.set_event_loop(loop)
+    loop.run_forever()
+
 if __name__ == "__main__":
     root = tk.Tk()
 
@@ -636,17 +681,13 @@ if __name__ == "__main__":
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
-    def run_asyncio_loop(loop):
-        asyncio.set_event_loop(loop)
-        loop.run_forever()
-    
-    threading_loop = threading.Thread(target=run_asyncio_loop, args=(loop,), daemon=True)
+    threading_loop = threading.Thread(target=run_asyncio_loop, args=(loop,),
+                                      daemon=True)
     threading_loop.start()
     
     app = NFLStatsApp(root)
     root.mainloop()
     
-    # Clean up asyncio loop
     loop.call_soon_threadsafe(loop.stop)
     threading_loop.join()
     loop.close()

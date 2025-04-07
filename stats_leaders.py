@@ -8,7 +8,6 @@ _cache = {}
 _cache_expiry = {}
 CACHE_DURATION = 600
 
-# Stat categories mapping
 STAT_CATEGORIES = {
     'passingYards': 'Passing Yards',
     'rushingYards': 'Rushing Yards',
@@ -28,15 +27,12 @@ async def fetch_stats_leaders(
     if year is None:
         year = str(datetime.now().year - 1)
     
-    # If category is not provided, return empty dict
     if category is None or category not in STAT_CATEGORIES:
         return {}
     
-    # Check cache first
     cache_key = f"leaders_{year}_{category}_{no_of_players}"
     current_time = time.time()
     
-    # Return cached data if available and not expired
     if cache_key in _cache and _cache_expiry.get(cache_key, 0) > current_time:
         print(f"Using cached stats leaders data for {category} in {year}")
         return {category: _cache[cache_key]}
@@ -56,16 +52,13 @@ async def fetch_stats_leaders(
                 data = await response.json()
                 leaders = []
                 
-                # Find the specific category in the response
                 for cat in data.get('categories', []):
                     if cat.get('name') == category:
-                        # Process leaders for this category
                         for i, leader in enumerate(cat.get('leaders', [])):
                             if i >= no_of_players:
                                 break
                             
                             try:
-                                # Get athlete details
                                 athlete_ref = leader.get('athlete', {}).get('$ref')
                                 if not athlete_ref:
                                     continue
@@ -76,7 +69,6 @@ async def fetch_stats_leaders(
                                     
                                     athlete_data = await athlete_response.json()
                                     
-                                    # Get team data if available
                                     team_name = "Free Agent"
                                     team_abbr = "FA"
                                     
@@ -90,14 +82,32 @@ async def fetch_stats_leaders(
                                         except Exception as e:
                                             print(f"Error fetching team data: {e}")
                                     
+                                    college = None
+                                    college_url = athlete_data.get('college', {}).get('$ref', None)
+
+                                    if college_url:
+                                        try:
+                                            async with session.get(college_url) as college_response:
+                                                if college_response.status == 200:
+                                                    college_data = await college_response.json()
+                                                    college = college_data.get('name', 'Unknown')
+                                        except Exception as e:
+                                            print(f"Error fetching college data: {e}")
+
                                     leader_info = {
                                         'name': athlete_data.get('displayName', 'Unknown'),
                                         'position': athlete_data.get('position', {}).get('abbreviation', 'UNK'),
                                         'team': team_name,
                                         'team_abbr': team_abbr,
+                                        'category': category,
                                         'value': leader.get('value', 0),
                                         'rank': i + 1,
-                                        'athlete_id': athlete_data.get('id')
+                                        'headshot': athlete_data.get('headshot', {}).get('href', None),
+                                        'athlete_id': athlete_data.get('id'),
+                                        'date_of_birth': athlete_data.get('dateOfBirth', None),
+                                        'debut_year': athlete_data.get('debutYear', None),
+                                        'college': college,
+                                        'draft': athlete_data.get('draft', None).get('displayText', None),
                                     }
                                     
                                     leaders.append(leader_info)
@@ -107,20 +117,17 @@ async def fetch_stats_leaders(
                         
                         break
                 
-                # Cache the result
                 _cache[cache_key] = leaders
                 _cache_expiry[cache_key] = current_time + CACHE_DURATION
                 
                 return {category: leaders}
     except Exception as e:
         print(f"Unexpected error in fetch_stats_leaders: {e}")
-        # If cache exists but is expired, use it as fallback
         if cache_key in _cache:
             print("Using expired cache as fallback")
             return {category: _cache[cache_key]}
         return {}
 
-# For testing the module directly
 if __name__ == "__main__":
     async def test():
         current_year = '2024'

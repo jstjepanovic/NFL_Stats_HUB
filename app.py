@@ -12,7 +12,7 @@ from io import BytesIO
 
 from standings import update_standings
 from stats_leaders import fetch_stats_leaders, STAT_CATEGORIES
-from image import fetch_logo_image
+from image import fetch_image
 
 class CSVHandler(ABC):
     @abstractmethod
@@ -174,50 +174,39 @@ class NFLStatsApp:
 
     
     def setup_standings_tab(self):
-        # Frame for standings
         self.standings_frame = ttk.Frame(self.standings_tab)
         self.standings_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        # Create Treeview widget with show="tree headings" to display the hierarchy
         columns = ("Rank", "Abbreviation", "Team", "W", "L", "T", "Win%")
         self.standings_tree = ttk.Treeview(self.standings_frame, columns=columns, show="tree headings")
         
-        # Define headings
         for col in columns:
             self.standings_tree.heading(col, text=col)
             width = 50 if col != "Team" else 150
             self.standings_tree.column(col, width=width, anchor=tk.CENTER)
         
-        # Configure the tree column (hierarchy column)
         self.standings_tree.column("#0", width=120, stretch=tk.NO)
         self.standings_tree.heading("#0", text="Conference/Division")
         
-        # Add scrollbar
         scrollbar = ttk.Scrollbar(self.standings_frame, orient=tk.VERTICAL, command=self.standings_tree.yview)
         self.standings_tree.configure(yscrollcommand=scrollbar.set)
         
-        # Pack widgets
         self.standings_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
-        # Add team click event
         self.standings_tree.bind("<Double-1>", self.on_team_click)
         
-        # Control frame
         control_frame = ttk.Frame(self.standings_tab)
         control_frame.pack(fill=tk.X, padx=10, pady=5)
         
-        # Refresh button
         refresh_btn = ttk.Button(control_frame, text="Refresh Data", command=self.refresh_standings)
         refresh_btn.pack(side=tk.LEFT, padx=5)
         
-        # Export button
         export_btn = ttk.Button(control_frame, text="Export to CSV", 
                                 command=lambda: asyncio.run_coroutine_threadsafe(self.export_standings_to_csv(), self.loop))
         export_btn.pack(side=tk.LEFT, padx=5)
 
         
-        # Last updated label
         self.standings_updated_var = tk.StringVar()
         self.standings_updated_var.set("Last updated: Never")
         updated_label = ttk.Label(control_frame, textvariable=self.standings_updated_var)
@@ -225,35 +214,22 @@ class NFLStatsApp:
 
     
     def setup_player_stats_tab(self):
-    # Create a notebook for different stat categories
         self.stats_notebook = ttk.Notebook(self.player_stats_tab)
         self.stats_notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        # Create frames for each stat category
         self.stat_frames = {}
         self.stat_trees = {}
         
-        # Define stat categories to display
-        categories = [
-            'passingYards', 'rushingYards', 'receivingYards', 
-            'sacks', 'interceptions', 'passingTouchdowns', 'receptions'
-        ]
         
-        # Create a tab and treeview for each category
-        for category in categories:
-            # Create frame
+        for category, display_name in STAT_CATEGORIES.items():
             frame = ttk.Frame(self.stats_notebook)
             self.stat_frames[category] = frame
             
-            # Add to notebook with display name
-            display_name = STAT_CATEGORIES[category]
             self.stats_notebook.add(frame, text=display_name)
             
-            # Create treeview for this category
             columns = ("Rank", "Player", "Position", "Team", "Value")
             tree = ttk.Treeview(frame, columns=columns, show="headings")
             
-            # Configure columns
             tree.heading("Rank", text="Rank")
             tree.heading("Player", text="Player")
             tree.heading("Position", text="Pos")
@@ -266,39 +242,31 @@ class NFLStatsApp:
             tree.column("Team", width=100, anchor=tk.CENTER)
             tree.column("Value", width=100, anchor=tk.CENTER)
             
-            # Add scrollbar
             scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=tree.yview)
             tree.configure(yscrollcommand=scrollbar.set)
             
-            # Pack widgets
             tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
             scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
             
-            # Store reference to tree
             self.stat_trees[category] = tree
             
-            # Add player click event
             tree.bind("<Double-1>", lambda e, cat=category: self.on_player_click(e, cat))
         
-        # Control frame
         control_frame = ttk.Frame(self.player_stats_tab)
         control_frame.pack(fill=tk.X, padx=10, pady=5)
         
-        # Refresh button
         selected_category_tab = self.stats_notebook.index(self.stats_notebook.select())
         categories = list(STAT_CATEGORIES.keys())
         selected_year = self.year_var.get()
         refresh_btn = ttk.Button(control_frame, text="Refresh Stats", command=lambda: self.refresh_player_stats(selected_year, categories[selected_category_tab]))
         refresh_btn.pack(side=tk.LEFT, padx=5)
-        
-        # Export button
+    
         export_btn = ttk.Button(control_frame, text="Export to CSV",
                             command=lambda: asyncio.run_coroutine_threadsafe(self.export_player_stats_to_csv(), self.loop))
         export_btn.pack(side=tk.LEFT, padx=5)
         
         self.stats_notebook.bind("<<NotebookTabChanged>>", self.on_stats_tab_change)
 
-        # Last updated label
         self.player_stats_updated_var = tk.StringVar()
         self.player_stats_updated_var.set("Last updated: Never")
         updated_label = ttk.Label(control_frame, textvariable=self.player_stats_updated_var)
@@ -311,7 +279,6 @@ class NFLStatsApp:
     
     def initial_data_fetch(self):
         self.status_var.set("Fetching initial data...")
-        # Fetch standings
         asyncio.run_coroutine_threadsafe(self.fetch_and_display_standings(), self.loop)
 
     
@@ -350,14 +317,12 @@ class NFLStatsApp:
     
     
     def update_standings_ui(self, standings_data: Dict[str, List[Dict[str, Any]]]):
-    # Clear existing data
         for item in self.standings_tree.get_children():
             self.standings_tree.delete(item)
         
         CONFERENCE_ORDER = ['AFC', 'NFC']
         DIVISION_ORDER = ['North', 'South', 'East', 'West']
         
-        # Group teams by conference and division
         conferences = {}
         for division_name, teams in standings_data.items():
             for team in teams:
@@ -370,30 +335,24 @@ class NFLStatsApp:
                 
                 conferences[conference][division_name].append(team)
         
-        # Insert conference headers, then divisions, then teams in fixed order
         for conference_name in CONFERENCE_ORDER:
             if conference_name not in conferences:
                 continue
             
-            # Add conference header
             conference_id = self.standings_tree.insert("", "end", text=conference_name, 
                                                     values=("", "", "", "", "", "", ""))
             
-            # Add divisions under conference in fixed order
             for division_suffix in DIVISION_ORDER:
                 division_name = f"{conference_name} {division_suffix}"
                 if division_name not in conferences[conference_name]:
                     continue
                 
-                # Add division header
                 division_id = self.standings_tree.insert(conference_id, "end", text=division_name, 
                                                         values=("", "", "", "", "", "", ""))
                 
-                # Sort teams by wins and win percentage
                 teams = conferences[conference_name][division_name]
                 sorted_teams = sorted(teams, key=lambda x: (-x['wins'], -x['winPercent']))
                 
-                # Add teams under division
                 for i, team in enumerate(sorted_teams, 1):
                     team_id = self.standings_tree.insert(
                         division_id, 
@@ -410,10 +369,8 @@ class NFLStatsApp:
                         tags=(team['abbreviation'],)
                     )
                     
-                    # Store team data in the tree item
                     self.standings_tree.item(team_id, tags=(team['abbreviation'],))
 
-        # Expand all items
         for conference_id in self.standings_tree.get_children():
             self.standings_tree.item(conference_id, open=True)
             for division_id in self.standings_tree.get_children(conference_id):
@@ -458,7 +415,7 @@ class NFLStatsApp:
         logo_label = ttk.Label(logo_frame, text="Click to\nload logo", cursor="hand2")
         logo_label.pack(expand=True, fill=tk.BOTH)
         
-        logo_label.bind("<Button-1>", lambda e: self.load_team_logo(logo_frame, team_data['logo']))
+        logo_label.bind("<Button-1>", lambda e: self.load_photo(logo_frame, team_data['logo']))
         
         info_frame = ttk.Frame(top_frame)
         info_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10)
@@ -478,24 +435,18 @@ class NFLStatsApp:
     @log_operation
     async def fetch_and_display_player_stats(self, year: str | None, category: str):
         try:
-            # Fetch player stats for just this category
             stats_data = await fetch_stats_leaders(year, category)
             
-            # Store in the current player stats dictionary
             if not hasattr(self, 'current_player_stats'):
                 self.current_player_stats = {}
             
-            # Update only the requested category
             if category in stats_data:
                 self.current_player_stats[category] = stats_data[category]
             
-            # Update UI for just this category
             self.root.after(0, lambda: self.update_player_stats_category_ui(category, stats_data.get(category, [])))
             
-            # Update status
             self.root.after(0, lambda: self.status_var.set(f"{STAT_CATEGORIES[category]} data updated successfully"))
             
-            # Update last updated time
             now = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
             self.root.after(0, lambda: self.player_stats_updated_var.set(f"Last updated: {now}"))
             
@@ -508,11 +459,9 @@ class NFLStatsApp:
             
         tree = self.stat_trees[category]
         
-        # Clear existing data
         for item in tree.get_children():
             tree.delete(item)
         
-        # Insert player data
         for player in players:
             tree.insert(
                 "", 
@@ -528,16 +477,13 @@ class NFLStatsApp:
             )
 
     def on_player_click(self, event, category):
-        # Get selected item
         tree = self.stat_trees[category]
         item_id = tree.identify('item', event.x, event.y)
         if not item_id:
             return
         
-        # Get athlete ID from tags
         athlete_id = tree.item(item_id, "tags")[0]
         
-        # Find player data
         player_data = None
         for player in self.current_player_stats.get(category, []):
             if str(player['athlete_id']) == athlete_id:
@@ -548,25 +494,39 @@ class NFLStatsApp:
             self.show_player_details(player_data)
 
     def show_player_details(self, player_data):
-        # Create a new window for player details
         details_window = tk.Toplevel(self.root)
         details_window.title(f"{player_data['name']} Details")
         details_window.geometry("600x400")
         
-        # Add player info
-        ttk.Label(details_window, text=f"{player_data['name']}", 
+        top_frame = ttk.Frame(details_window)
+        top_frame.pack(fill=tk.X, padx=20, pady=10)
+        
+        headshot__frame = ttk.Frame(top_frame, width=100, height=100, relief=tk.GROOVE, borderwidth=2)
+        headshot__frame.pack(side=tk.LEFT, padx=10)
+        headshot__frame.pack_propagate(False)
+        
+        headshot_label = ttk.Label(headshot__frame, text="Click to\nload headshot", cursor="hand2")
+        headshot_label.pack(expand=True, fill=tk.BOTH)
+        
+        headshot_label.bind("<Button-1>", lambda e: self.load_photo(headshot__frame, player_data['headshot']))
+
+        player_info_frame = ttk.Frame(top_frame)
+        player_info_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10)
+
+        ttk.Label(player_info_frame, text=f"{player_data['name']}", 
                 font=("Arial", 16, "bold")).pack(pady=10)
         
-        ttk.Label(details_window, text=f"Position: {player_data['position']}").pack(anchor="w", padx=20)
-        ttk.Label(details_window, text=f"Team: {player_data['team']}").pack(anchor="w", padx=20)
+        ttk.Label(player_info_frame, text=f"Position: {player_data['position']}").pack(anchor="w", padx=20)
+        ttk.Label(player_info_frame, text=f"Team: {player_data['team']}").pack(anchor="w", padx=20)
         
-        # Add stat value
-        ttk.Label(details_window, text=f"Value: {player_data['value']}").pack(anchor="w", padx=20)
+        ttk.Label(player_info_frame, text=f"DoB: {player_data['date_of_birth']}").pack(anchor="w", padx=20)
+        ttk.Label(player_info_frame, text=f"College: {player_data['college']}").pack(anchor="w", padx=20)
+        ttk.Label(player_info_frame, text=f"Draft {player_data['draft']}").pack(anchor="w", padx=20)
+        ttk.Label(player_info_frame, text=f"Debut year: {player_data['debut_year']}").pack(anchor="w", padx=20)
         
-        # Add a button to close the window
         ttk.Button(details_window, text="Close", command=details_window.destroy).pack(pady=20)
 
-    def load_team_logo(self, parent_widget, url):
+    def load_photo(self, parent_widget, url):
         for widget in parent_widget.winfo_children():
             widget.destroy()
         
@@ -578,7 +538,7 @@ class NFLStatsApp:
 
     async def fetch_and_display_logo(self, parent_widget, url):
         try:
-            image = await fetch_logo_image(url)
+            image = await fetch_image(url)
             if image:
                 self.root.after(0, lambda: self.update_logo_widget(parent_widget, image))
         except Exception as e:
@@ -655,11 +615,9 @@ class NFLStatsApp:
     @validate_data
     async def export_standings_to_csv(self):
         if not self.current_standings:
-            # Use after to schedule UI updates from the main thread
             self.root.after(0, lambda: messagebox.showinfo("Export", "No standings data to export"))
             return
         
-        # Flatten the data for CSV export
         flat_data = []
         for division, teams in self.current_standings.items():
             for team in teams:
@@ -667,29 +625,24 @@ class NFLStatsApp:
                 team_copy['division'] = division
                 flat_data.append(team_copy)
         
-        # Ask for save location - must be done in the main thread
         filename_future = asyncio.Future()
         self.root.after(0, lambda: self._get_save_filename(filename_future))
         
-        # Wait for the filename
         filename = await filename_future
         print(f"Selected filename: {filename}")
         
         if not filename:
             return
         
-        # Create CSV handler and save
         csv_handler = NFLDataCSVHandler()
         success = await csv_handler.save_to_csv(flat_data, filename)
         
-        # Show result message in the main thread
         if success:
             self.root.after(0, lambda: messagebox.showinfo("Export", "Data exported successfully"))
         else:
             self.root.after(0, lambda: messagebox.showerror("Export Error", "Failed to export data"))
 
     def _get_save_filename(self, future, default_name="NFL_Stats"):
-        """Helper method to get filename from dialog and set the future result"""
         filename = filedialog.asksaveasfilename(
             defaultextension=".csv",
             filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],

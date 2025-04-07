@@ -1,6 +1,6 @@
 import aiohttp
 
-async def fetch_logo_image(url: str) -> bytes | None:
+async def fetch_image(url: str) -> bytes | None:
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as response:
@@ -8,5 +8,5 @@ async def fetch_logo_image(url: str) -> bytes | None:
                     return await response.read()
         return None
     except Exception as e:
-        print(f"Error fetching logo: {e}")
+        print(f"Error fetching image: {e}")
         return None

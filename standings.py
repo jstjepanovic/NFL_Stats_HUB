@@ -60,6 +60,8 @@ async def fetch_standings(url: str, conference_name: str) -> List[Dict[str, Any]
                                     'ties': int(next(stat['value'] for stat in stats if stat['name'] == 'ties')),
                                     'winPercent': float(next(stat['value'] for stat in stats 
                                                             if stat['name'] == 'winPercent')),
+                                    'logo': team_data['logos'][0]['href'] if team_data['logos'] else None,
+                                    'team_id': team_data['id'],
                                 }
                                 
                                 standings.append(team_info)

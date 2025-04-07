@@ -12,6 +12,7 @@ from io import BytesIO
 
 from standings import update_standings
 from stats_leaders import fetch_stats_leaders, STAT_CATEGORIES
+from image import fetch_logo_image
 
 class CSVHandler(ABC):
     @abstractmethod
@@ -420,21 +421,16 @@ class NFLStatsApp:
 
     
     def on_team_click(self, event):
-        # Get selected item
         item_id = self.standings_tree.identify('item', event.x, event.y)
         if not item_id:
             return
         
-        # Get parent (division) if this is a team
         parent_id = self.standings_tree.parent(item_id)
         if not parent_id:
-            # This is a division header, not a team
             return
         
-        # Get team abbreviation from tags
         team_abbr = self.standings_tree.item(item_id, "tags")[0]
         
-        # Find team data
         team_data = None
         for division in self.current_standings.values():
             for team in division:
@@ -448,42 +444,32 @@ class NFLStatsApp:
             self.show_team_details(team_data)
     
     def show_team_details(self, team_data):
-         # Create a new window for team details
         details_window = tk.Toplevel(self.root)
         details_window.title(f"{team_data['name']} Details")
         details_window.geometry("500x350")
         
-        # Create a frame for the logo and info
         top_frame = ttk.Frame(details_window)
         top_frame.pack(fill=tk.X, padx=20, pady=10)
         
-        # Create a clickable placeholder for the logo
         logo_frame = ttk.Frame(top_frame, width=100, height=100, relief=tk.GROOVE, borderwidth=2)
         logo_frame.pack(side=tk.LEFT, padx=10)
-        logo_frame.pack_propagate(False)  # Prevent frame from shrinking
+        logo_frame.pack_propagate(False)
         
-        # Add a label with instructions
         logo_label = ttk.Label(logo_frame, text="Click to\nload logo", cursor="hand2")
         logo_label.pack(expand=True, fill=tk.BOTH)
         
-        # Bind click event to load the logo
-        # logo_url = f"https://a.espncdn.com/i/teamlogos/nfl/500/{team_data['abbreviation'].lower()}.png"
-        # logo_label.bind("<Button-1>", lambda e: self.load_team_logo(logo_frame, logo_url))
+        logo_label.bind("<Button-1>", lambda e: self.load_team_logo(logo_frame, team_data['logo']))
         
-        # Create info frame
         info_frame = ttk.Frame(top_frame)
         info_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10)
         
-        # Add team info
         ttk.Label(info_frame, text=f"{team_data['name']} ({team_data['abbreviation']})",
                 font=("Arial", 16, "bold")).pack(anchor="w")
         ttk.Label(info_frame, text=f"Conference: {team_data['conference']}").pack(anchor="w")
         ttk.Label(info_frame, text=f"Division: {team_data['division']}").pack(anchor="w")
         ttk.Label(info_frame, text=f"Record: {team_data['wins']}-{team_data['losses']}-{team_data['ties']} ({team_data['winPercent']:.3f})").pack(anchor="w")
         
-        # Add a button to close the window
         ttk.Button(details_window, text="Close", command=details_window.destroy).pack(pady=20)
-
 
     def refresh_player_stats(self, category: str, year: str | None = None):
         self.status_var.set(f"Loading {STAT_CATEGORIES[category]} data...")
@@ -580,13 +566,62 @@ class NFLStatsApp:
         # Add a button to close the window
         ttk.Button(details_window, text="Close", command=details_window.destroy).pack(pady=20)
 
+    def load_team_logo(self, parent_widget, url):
+        for widget in parent_widget.winfo_children():
+            widget.destroy()
+        
+        loading_label = ttk.Label(parent_widget, text="Loading...")
+        loading_label.pack(expand=True, fill=tk.BOTH)
+        
+        asyncio.run_coroutine_threadsafe(
+            self.fetch_and_display_logo(parent_widget, url), self.loop)
+
+    async def fetch_and_display_logo(self, parent_widget, url):
+        try:
+            image = await fetch_logo_image(url)
+            if image:
+                self.root.after(0, lambda: self.update_logo_widget(parent_widget, image))
+        except Exception as e:
+            self.root.after(0, lambda: self.update_logo_widget(
+                parent_widget, None, f"Error: {str(e)}"))
+
+    def update_logo_widget(self, parent_widget, image_data, error_text=None):
+        for widget in parent_widget.winfo_children():
+            widget.destroy()
+        
+        if error_text:
+            error_label = ttk.Label(parent_widget, text=error_text, wraplength=90)
+            error_label.place(relx=0.5, rely=0.5, anchor="center")
+            return
+        
+        if not image_data:
+            na_label = ttk.Label(parent_widget, text="Logo not\navailable")
+            na_label.place(relx=0.5, rely=0.5, anchor="center")
+            return
+        
+        try:
+            img = Image.open(BytesIO(image_data))
+            img = img.resize((100, 100), Image.Resampling.LANCZOS)
+            
+            photo = ImageTk.PhotoImage(img)
+            
+            if not hasattr(parent_widget, 'image_references'):
+                parent_widget.image_references = []
+            parent_widget.image_references.append(photo)
+            
+            logo_label = ttk.Label(parent_widget, image=photo)
+            logo_label.place(relx=0.5, rely=0.5, anchor="center")
+        except Exception as e:
+            error_label = ttk.Label(parent_widget, text=f"Error: {str(e)}", wraplength=90)
+            error_label.place(relx=0.5, rely=0.5, anchor="center")
+
+
     @validate_data
     async def export_player_stats_to_csv(self):
         if not hasattr(self, 'current_player_stats') or not self.current_player_stats:
             self.root.after(0, lambda: messagebox.showinfo("Export", "No player stats data to export"))
             return
         
-        # Get current tab/category
         current_tab = self.stats_notebook.index(self.stats_notebook.select())
         categories = list(STAT_CATEGORIES.keys())
         if current_tab >= len(categories):
@@ -600,21 +635,17 @@ class NFLStatsApp:
             self.root.after(0, lambda: messagebox.showinfo("Export", "No data to export for this category"))
             return
         
-        # Ask for save location - must be done in the main thread
         filename_future = asyncio.Future()
         self.root.after(0, lambda: self._get_save_filename(filename_future, f"NFL_{STAT_CATEGORIES[current_category]}_Leaders"))
         
-        # Wait for the filename
         filename = await filename_future
         
         if not filename:
             return
         
-        # Create CSV handler and save
         csv_handler = NFLDataCSVHandler()
         success = await csv_handler.save_to_csv(players, filename)
         
-        # Show result message in the main thread
         if success:
             self.root.after(0, lambda: messagebox.showinfo("Export", "Data exported successfully"))
         else:

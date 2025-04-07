@@ -1,14 +1,12 @@
 import aiohttp
 
-async def fetch_logo_image(self, url):
+async def fetch_logo_image(url: str) -> bytes | None:
     try:
-        timeout = aiohttp.ClientTimeout(total=5)
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=timeout) as response:
-                if response.status != 200:
-                    return None
-                image_data = await response.read()
-                return image_data
+            async with session.get(url) as response:
+                if response.status == 200:
+                    return await response.read()
+        return None
     except Exception as e:
         print(f"Error fetching logo: {e}")
         return None

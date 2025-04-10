@@ -415,7 +415,7 @@ class NFLStatsApp:
         logo_label = ttk.Label(logo_frame, text="Click to\nload logo", cursor="hand2")
         logo_label.pack(expand=True, fill=tk.BOTH)
         
-        logo_label.bind("<Button-1>", lambda e: self.load_photo(logo_frame, team_data['logo']))
+        logo_label.bind("<Button-1>", lambda _: self.load_photo(logo_frame, team_data['logo']))
         
         info_frame = ttk.Frame(top_frame)
         info_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10)
@@ -425,6 +425,14 @@ class NFLStatsApp:
         ttk.Label(info_frame, text=f"Conference: {team_data['conference']}").pack(anchor="w")
         ttk.Label(info_frame, text=f"Division: {team_data['division']}").pack(anchor="w")
         ttk.Label(info_frame, text=f"Record: {team_data['wins']}-{team_data['losses']}-{team_data['ties']} ({team_data['winPercent']:.3f})").pack(anchor="w")
+        ttk.Label(info_frame, text=f"Points For: {team_data['pointsFor']}").pack(anchor="w")
+        ttk.Label(info_frame, text=f"Points Against: {team_data['pointsAgainst']}").pack(anchor="w")
+        ttk.Label(info_frame, text=f"Point Differential: {team_data['pointDifferential']}").pack(anchor="w")
+        ttk.Label(info_frame, text=f"Home Record: {team_data['homeRecord']}").pack(anchor="w")
+        ttk.Label(info_frame, text=f"Away Record: {team_data['awayRecord']}").pack(anchor="w")
+        ttk.Label(info_frame, text=f"Venue: {team_data['venue']}").pack(anchor="w")
+        address = team_data['address']
+        ttk.Label(info_frame, text=f"Location: {address['city']}, {address['state']}").pack(anchor="w")
         
         ttk.Button(details_window, text="Close", command=details_window.destroy).pack(pady=20)
 
@@ -522,7 +530,7 @@ class NFLStatsApp:
         ttk.Label(player_info_frame, text=f"DoB: {player_data['date_of_birth']}").pack(anchor="w", padx=20)
         ttk.Label(player_info_frame, text=f"College: {player_data['college']}").pack(anchor="w", padx=20)
         ttk.Label(player_info_frame, text=f"Draft {player_data['draft']}").pack(anchor="w", padx=20)
-        ttk.Label(player_info_frame, text=f"Debut year: {player_data['debut_year']}").pack(anchor="w", padx=20)
+        ttk.Label(player_info_frame, text=f"Debut Year: {player_data['debut_year']}").pack(anchor="w", padx=20)
         
         ttk.Button(details_window, text="Close", command=details_window.destroy).pack(pady=20)
 

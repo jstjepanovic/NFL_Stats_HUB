@@ -94,6 +94,19 @@ async def fetch_stats_leaders(
                                         except Exception as e:
                                             print(f"Error fetching college data: {e}")
 
+                                    dob = athlete_data.get('dateOfBirth', None)
+                                    formatted_dob = None
+                                    if dob:
+                                        try:
+                                            dob_date = datetime.strptime(dob, '%Y-%m-%dT%H:%M%z')
+                                            formatted_dob = dob_date.strftime('%d.%m.%Y.')
+                                        except Exception as e:
+                                            print(f"Error formatting date: {e}")
+
+                                    debut_year = athlete_data.get('debutYear', None)
+                                    if not debut_year:
+                                        debut_year = athlete_data.get('draft', None).get('year', None)
+
                                     leader_info = {
                                         'name': athlete_data.get('displayName', 'Unknown'),
                                         'position': athlete_data.get('position', {}).get('abbreviation', 'UNK'),
@@ -104,7 +117,7 @@ async def fetch_stats_leaders(
                                         'rank': i + 1,
                                         'headshot': athlete_data.get('headshot', {}).get('href', None),
                                         'athlete_id': athlete_data.get('id'),
-                                        'date_of_birth': athlete_data.get('dateOfBirth', None),
+                                        'date_of_birth': formatted_dob,
                                         'debut_year': athlete_data.get('debutYear', None),
                                         'college': college,
                                         'draft': athlete_data.get('draft', None).get('displayText', None),

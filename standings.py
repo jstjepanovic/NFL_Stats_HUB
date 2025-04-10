@@ -49,7 +49,7 @@ async def fetch_standings(url: str, conference_name: str) -> List[Dict[str, Any]
                                     
                                 group_data: Dict[str, Any] = await group_response.json()
                                 division: str = group_data['name']
-                                
+
                                 team_info: Dict[str, Any] = {
                                     'conference': conference_name,
                                     'division': division,
@@ -61,6 +61,13 @@ async def fetch_standings(url: str, conference_name: str) -> List[Dict[str, Any]
                                     'winPercent': float(next(stat['value'] for stat in stats 
                                                             if stat['name'] == 'winPercent')),
                                     'logo': team_data['logos'][0]['href'] if team_data['logos'] else None,
+                                    'pointsFor': int(next(stat['value'] for stat in stats if stat['name'] == 'pointsFor')),
+                                    'pointsAgainst': int(next(stat['value'] for stat in stats if stat['name'] == 'pointsAgainst')),
+                                    'pointDifferential': int(next(stat['value'] for stat in stats if stat['name'] == 'pointDifferential')),
+                                    'homeRecord': entry['records'][1]['summary'],
+                                    'awayRecord': entry['records'][2]['summary'],
+                                    'venue': team_data['venue']['fullName'] if team_data['venue'] else None,
+                                    'address': team_data['venue']['address'] if team_data['venue']['address'] else None,
                                     'team_id': team_data['id'],
                                 }
                                 
@@ -144,15 +151,6 @@ async def update_standings(year: str | None = None) -> Dict[str, List[Dict[str, 
         return {}
 
 def sort_teams(teams):
-    """
-    Sort teams by wins and win percentage.
-    
-    Args:
-        teams: List of team dictionaries
-        
-    Returns:
-        Sorted list of teams
-    """
     return sorted(teams, key=lambda x: (-x['wins'], -x['winPercent']))
 
 
@@ -165,6 +163,7 @@ if __name__ == "__main__":
         for division, teams in standings.items():
             print(f"\n{division}:")
             for i, team in enumerate(teams, 1):
-                print(f"{i}. {team['abbreviation']} {team['name']}: {team['wins']}-{team['losses']}-{team['ties']} ({team['winPercent']:.3f})")
+                # print(f"{i}. {team['abbreviation']} {team['name']}: {team['wins']}-{team['losses']}-{team['ties']} ({team['winPercent']:.3f})")
+                print(team)
     
     asyncio.run(test())

@@ -1,0 +1,45 @@
+name: nfl-stats-hub
+version: '1.0'
+summary: NFL Stats Hub - NFL Standings and Player Stats GUI
+description: |
+  A Python Tkinter application to view NFL standings and player stats with export features.
+
+base: core22
+grade: stable
+confinement: strict
+
+apps:
+  nfl-stats-hub:
+    command: bin/nfl-stats-hub
+    extensions: [gnome]
+    plugs:
+      - network
+      - home
+
+parts:
+  nfl-stats-hub:
+    plugin: python
+    source: .
+    python-requirements: 
+      - requirements.txt
+    stage-packages:
+      - python3-tk
+      - python3-pil
+    override-build: |
+      craftctl default
+      # Create a wrapper script
+      mkdir -p $CRAFT_PART_INSTALL/bin
+      echo '#!/bin/sh' > $CRAFT_PART_INSTALL/bin/nfl-stats-hub
+      echo 'exec /usr/bin/python3 $SNAP/app/app.py "$@"' >> $CRAFT_PART_INSTALL/bin/nfl-stats-hub
+      chmod +x $CRAFT_PART_INSTALL/bin/nfl-stats-hub
+    override-prime: |
+      craftctl default
+      mkdir -p $CRAFT_PRIME/app
+      cp -r $CRAFT_PART_SRC/* $CRAFT_PRIME/app/
+      # Make sure meta/gui exists and permissions are correct
+      mkdir -p $CRAFT_PRIME/meta/gui
+      if [ -d $CRAFT_PART_SRC/snap/gui ]; then
+        cp -r $CRAFT_PART_SRC/snap/gui/* $CRAFT_PRIME/meta/gui/
+      fi
+      # Explicitly set world-readable permissions (0644) on meta/gui files
+      find $CRAFT_PRIME/meta/gui -type f -exec chmod 0644 {} \;

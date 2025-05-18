@@ -37,9 +37,9 @@ class NFLDataCSVHandler(CSVHandler):
 def log_operation(func):
     @wraps(func)
     async def wrapper(*args, **kwargs):
-        print(f"[{datetime.now().strftime("%d-%m-%Y %H:%M:%S")}] Executing {func.__name__}")
+        print(f"[{datetime.now().strftime('%d-%m-%Y %H:%M:%S')}] Executing {func.__name__}")
         result = await func(*args, **kwargs)
-        print(f"[{datetime.now().strftime("%d-%m-%Y %H:%M:%S")}] Completed {func.__name__}")
+        print(f"[{datetime.now().strftime('%d-%m-%Y %H:%M:%S')}] Executing {func.__name__}")
         return result
     return wrapper
 

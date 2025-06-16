@@ -1,4 +1,7 @@
+import logging
+
 import aiohttp
+
 
 async def fetch_image(url: str) -> bytes | None:
     try:
@@ -8,5 +11,7 @@ async def fetch_image(url: str) -> bytes | None:
                     return await response.read()
         return None
     except Exception as e:
-        print(f"Error fetching image: {e}")
+        logging.error(
+            f"Error fetching image: {e}"
+        )
         return None

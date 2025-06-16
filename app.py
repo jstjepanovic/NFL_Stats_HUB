@@ -1,72 +1,182 @@
+import asyncio
+import logging
+import os
+from datetime import datetime
+from functools import wraps
+from io import BytesIO
+from typing import (
+    Any, Dict, List, Callable, Awaitable, Optional
+)
+import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
-import asyncio
-import threading
-from datetime import datetime
-import csv
-from abc import ABC, abstractmethod
-from functools import wraps
-from typing import Dict, List, Any
+
+
 from PIL import Image, ImageTk
-from io import BytesIO
 
 from standings import update_standings
 from stats_leaders import fetch_stats_leaders, STAT_CATEGORIES
 from image import fetch_image
+from exporters import (
+    CSVDataExporter, JSONDataExporter, ExcelDataExporter
+)
 
-class CSVHandler(ABC):
-    @abstractmethod
-    async def save_to_csv(self, data, filename) -> bool:
-        pass
+# POSTAVKE LOGGING LIBRARY
+def setup_logging() -> None:
+    now = datetime.now()
+    log_dir = os.path.join("logs", now.strftime("%Y-%m-%d"))
+    os.makedirs(log_dir, exist_ok=True)
+    log_filename = os.path.join(log_dir,
+                                now.strftime("run_%Y-%m-%d_%H-%M-%S.log"))
 
-class NFLDataCSVHandler(CSVHandler):
-    async def save_to_csv(self, data, filename):
-        try:
-            with open(filename, 'w', newline='') as file:
-                writer = csv.writer(file)
-                if data and len(data) > 0:
-                    writer.writerow(data[0].keys())
-                    for row in data:
-                        writer.writerow(row.values())
-            return True
-        except Exception as e:
-            print(f"Error saving to CSV: {e}")
-            return False
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[
+            logging.FileHandler(log_filename, encoding="utf-8"),
+            logging.StreamHandler()
+        ]
+    )
 
-# Decorator for logging
-def log_operation(func):
+# LOGOVI
+def log_operation(func: Callable[..., Awaitable[Any]]
+                  ) -> Callable[..., Awaitable[Any]]:
     @wraps(func)
-    async def wrapper(*args, **kwargs):
-        print(f"[{datetime.now().strftime('%d-%m-%Y %H:%M:%S')}] Executing {func.__name__}")
+    async def wrapper(*args: Any, **kwargs: Any) -> Any:
+        logging.info(f"Executing {func.__name__}")
         result = await func(*args, **kwargs)
-        print(f"[{datetime.now().strftime('%d-%m-%Y %H:%M:%S')}] Executing {func.__name__}")
+        logging.info(f"Finished {func.__name__}")
         return result
     return wrapper
 
-# Decorator for data validation
-def validate_data(func):
+
+def validate_data(func: Callable[..., Awaitable[Any]]
+                  ) -> Callable[..., Awaitable[Any]]:
     @wraps(func)
-    async def wrapper(*args, **kwargs):
-        print(f"Validating data before {func.__name__}")
-        # Add validation logic here
+    async def wrapper(*args: Any, **kwargs: Any) -> Any:
+        logging.info(f"Validating data before {func.__name__}")
+        self = args[0] if args else None
+        if self is None:
+            logging.error("validate_data:" \
+                        "No self instance found for validation.")
+            return
+        if func.__name__ == 'export_player_stats_to_csv':
+            if not hasattr(self, 'current_player_stats') or not self.current_player_stats:
+                logging.error("No player stats data to export (validation failed).")
+                self.root.after(0, lambda: messagebox.showerror("Export Error", "No player stats data to export (validation failed)."))
+                return
+            if not hasattr(self, 'stats_notebook'):
+                logging.error("No stats_notebook attribute found (validation failed).")
+                self.root.after(0, lambda: messagebox.showerror("Export Error", "Internal error: stats_notebook missing (validation failed)."))
+                return
+            current_tab = self.stats_notebook.index(self.stats_notebook.select())
+            categories = list(STAT_CATEGORIES.keys())
+            if current_tab >= len(categories):
+                logging.error("No stat category selected for export (validation failed).")
+                self.root.after(0, lambda: messagebox.showerror("Export Error", "Please select a stat category (validation failed)."))
+                return
+            current_category = categories[current_tab]
+            players = self.current_player_stats.get(current_category, [])
+            if not players:
+                logging.error(
+                    f"No data to export for category: {current_category} "
+                    "(validation failed)."
+                )
+                self.root.after(
+                    0,
+                    lambda: messagebox.showerror(
+                        "Export Error",
+                        "No data to export for this category "
+                        "(validation failed)."
+                    )
+                )
+                return
+            required_fields = [
+                "name", "position", "team", "team_abbr", "value", "rank"
+            ]
+            for player in players:
+                for field in required_fields:
+                    if field not in player or player[field] in (None, ""):
+                        logging.error(
+                            f"Player data missing required field '{field}': "
+                            f"{player}"
+                        )
+                        self.root.after(
+                            0,
+                            lambda: messagebox.showerror(
+                                "Export Error",
+                                f"Player data missing required field '{field}'.",
+                            )
+                        )
+                        return
+        elif func.__name__ == 'export_standings_to_csv':
+            if not hasattr(self, 'current_standings') or not self.current_standings:
+                logging.error(
+                    "No standings data to export (validation failed)."
+                )
+                self.root.after(
+                    0,
+                    lambda: messagebox.showerror(
+                        "Export Error",
+                        "No standings data to export (validation failed)."
+                    )
+                )
+                return
+            flat_data = []
+            for division, teams in self.current_standings.items():
+                for team in teams:
+                    team_copy = team.copy()
+                    team_copy['division'] = division
+                    flat_data.append(team_copy)
+            if not flat_data:
+                logging.error(
+                    "No flattened standings data to export (validation failed)."
+                )
+                self.root.after(
+                    0,
+                    lambda: messagebox.showerror(
+                        "Export Error",
+                        "No standings data to export (validation failed)."
+                    )
+                )
+                return
+            required_fields = [
+                "conference", "division", "name", "abbreviation", "wins",
+                "losses", "ties", "winPercent"
+            ]
+            for team in flat_data:
+                for field in required_fields:
+                    if field not in team or team[field] in (None, ""):
+                        logging.error(
+                            f"Team data missing required field '{field}': {team}"
+                        )
+                        self.root.after(
+                            0,
+                            lambda: messagebox.showerror(
+                                "Export Error",
+                                f"Team data missing required field '{field}'.",
+                            )
+                        )
+                        return
         result = await func(*args, **kwargs)
         return result
     return wrapper
 
-# Closure for filtering data
-def create_filter(filter_criteria):
-    def filter_data(data):
+
+def create_filter(filter_criteria: Callable[[Any], bool]
+                  ) -> Callable[[List[Any]], List[Any]]:
+    def filter_data(data: List[Any]) -> List[Any]:
         return [item for item in data if filter_criteria(item)]
     return filter_data
 
 class NFLStatsApp:
-    def __init__(self, root):
+    def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("NFL STATS HUB")
         self.root.geometry("1200x800")
         self.root.bind('<Escape>', lambda _: self.root.attributes('-fullscreen', False))
         
-        self.current_standings = {}
+        self.current_standings: Dict[str, List[Dict[str, Any]]] = {}
         
         self.setup_ui()
         
@@ -78,9 +188,9 @@ class NFLStatsApp:
         
         self.root.after(600000, self.schedule_refresh)
     
-        self.stats_loaded = False
+        self.stats_loaded: bool = False
 
-    def setup_ui(self):
+    def setup_ui(self) -> None:
         # Create main frame
         self.main_frame = ttk.Frame(self.root, padding="10")
         self.main_frame.pack(fill=tk.BOTH, expand=True)
@@ -93,18 +203,11 @@ class NFLStatsApp:
         year_label = ttk.Label(self.year_frame, text="Select Year:")
         year_label.pack(side=tk.LEFT, padx=5)
         
-        # Add year selection dropdown
-        style = ttk.Style()
-        style.map('Custom.TCombobox',
-            fieldbackground=[('readonly', 'white')],
-            selectbackground=[('readonly', 'white')],
-            selectforeground=[('readonly', 'black')])
-    
         current_year = datetime.now().year
         years = [str(year) for year in range(2004, current_year)]
         self.year_var = tk.StringVar()
         self.year_dropdown = ttk.Combobox(self.year_frame, textvariable=self.year_var, 
-                                    values=years, style='Custom.TCombobox', state='readonly')
+                                    values=years, state='readonly')
         self.year_dropdown.set(str(current_year - 1))
         self.year_dropdown.pack(side=tk.LEFT, padx=5)
 
@@ -135,7 +238,7 @@ class NFLStatsApp:
         self.status_bar = ttk.Label(self.root, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W)
         self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
 
-    def on_year_change(self, event):
+    def on_year_change(self, event: Any) -> None:
         selected_year = self.year_var.get()
         
         current_tab = self.tab_control.index(self.tab_control.select())
@@ -149,7 +252,7 @@ class NFLStatsApp:
 
         self._last_selected_year = selected_year
 
-    def on_tab_change(self, event):
+    def on_tab_change(self, event: Any) -> None:
         current_tab = self.tab_control.index(self.tab_control.select())
         selected_year = self.year_var.get()
     
@@ -163,7 +266,7 @@ class NFLStatsApp:
                 category = categories[selected_category_tab]
                 self.refresh_player_stats(category, selected_year)
 
-    def on_stats_tab_change(self, event):
+    def on_stats_tab_change(self, event: Any) -> None:
         selected_category_tab = self.stats_notebook.index(self.stats_notebook.select())
         categories = list(STAT_CATEGORIES.keys())
         selected_year = self.year_var.get()
@@ -173,7 +276,7 @@ class NFLStatsApp:
             self.refresh_player_stats(category, selected_year)
 
     
-    def setup_standings_tab(self):
+    def setup_standings_tab(self) -> None:
         self.standings_frame = ttk.Frame(self.standings_tab)
         self.standings_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
@@ -202,18 +305,82 @@ class NFLStatsApp:
         refresh_btn = ttk.Button(control_frame, text="Refresh Data", command=self.refresh_standings)
         refresh_btn.pack(side=tk.LEFT, padx=5)
         
-        export_btn = ttk.Button(control_frame, text="Export to CSV", 
-                                command=lambda: asyncio.run_coroutine_threadsafe(self.export_standings_to_csv(), self.loop))
-        export_btn.pack(side=tk.LEFT, padx=5)
+        export_btn_csv = ttk.Button(control_frame, text="Export CSV", 
+            command=lambda: self.export_standings_to_file_sync('csv'))
+        export_btn_csv.pack(side=tk.LEFT, padx=2)
+        export_btn_json = ttk.Button(control_frame, text="Export JSON", 
+            command=lambda: self.export_standings_to_file_sync('json'))
+        export_btn_json.pack(side=tk.LEFT, padx=2)
+        export_btn_xlsx = ttk.Button(control_frame, text="Export Excel", 
+            command=lambda: self.export_standings_to_file_sync('xlsx'))
+        export_btn_xlsx.pack(side=tk.LEFT, padx=2)
 
-        
+        self.division_filter_var = tk.StringVar()
+        self.min_wins_var = tk.StringVar(value="0")
+
+        ttk.Label(control_frame, text="Division:").pack(side=tk.LEFT, padx=2)
+
+        division_entry = ttk.Entry(control_frame, textvariable=self.division_filter_var, width=12)
+        division_entry.pack(side=tk.LEFT, padx=2)
+
+        ttk.Label(control_frame, text="Min Wins:").pack(side=tk.LEFT, padx=2)
+
+        min_wins_entry = ttk.Entry(control_frame, textvariable=self.min_wins_var, width=4)
+        min_wins_entry.pack(side=tk.LEFT, padx=2)
+
+        apply_div_filter_btn = ttk.Button(control_frame, text="Apply Filter", command=self.apply_division_filter)
+        apply_div_filter_btn.pack(side=tk.LEFT, padx=2)
+
+        clear_div_filter_btn = ttk.Button(control_frame, text="Clear Filter", command=self.clear_division_filter)
+        clear_div_filter_btn.pack(side=tk.LEFT, padx=2)
+
         self.standings_updated_var = tk.StringVar()
         self.standings_updated_var.set("Last updated: Never")
+        
         updated_label = ttk.Label(control_frame, textvariable=self.standings_updated_var)
         updated_label.pack(side=tk.RIGHT, padx=5)
 
+    def apply_division_filter(self) -> None:
+        division_name = self.division_filter_var.get().strip()
+        try:
+            min_wins = int(self.min_wins_var.get())
+        except ValueError:
+            messagebox.showinfo("Filter", "Minimum wins must be an integer.")
+            return
+        filtered = {}
+        
+        if not division_name:
+            for div, teams in self.current_standings.items():
+                filtered_teams = self.filter_teams_by_division(div, min_wins)
+                if filtered_teams:
+                    filtered[div] = filtered_teams
+            if not filtered:
+                messagebox.showinfo("Filter", f"No teams found with min {min_wins} wins.")
+                return
+            self.filtered_standings = filtered
+            self.update_standings_ui(filtered)
+            self.status_var.set(f"Filtered standings: min {min_wins} wins")
+            return
+        
+        for div, teams in self.current_standings.items():
+            if division_name.lower() in div.lower():
+                filtered_teams = self.filter_teams_by_division(div, min_wins)
+                if filtered_teams:
+                    filtered[div] = filtered_teams
+        if not filtered:
+            messagebox.showinfo("Filter", f"No divisions or teams found for '{division_name}' with min {min_wins} wins.")
+            return
+        self.filtered_standings = filtered
+        self.update_standings_ui(filtered)
+        self.status_var.set(f"Filtered standings: {division_name} with min {min_wins} wins")
+
+    def clear_division_filter(self) -> None:
+        self.filtered_standings = None
+        self.update_standings_ui(self.current_standings)
+        self.status_var.set("Cleared division filter")
+
     
-    def setup_player_stats_tab(self):
+    def setup_player_stats_tab(self) -> None:
         self.stats_notebook = ttk.Notebook(self.player_stats_tab)
         self.stats_notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
@@ -261,10 +428,26 @@ class NFLStatsApp:
         refresh_btn = ttk.Button(control_frame, text="Refresh Stats", command=lambda: self.refresh_player_stats(selected_year, categories[selected_category_tab]))
         refresh_btn.pack(side=tk.LEFT, padx=5)
     
-        export_btn = ttk.Button(control_frame, text="Export to CSV",
-                            command=lambda: asyncio.run_coroutine_threadsafe(self.export_player_stats_to_csv(), self.loop))
-        export_btn.pack(side=tk.LEFT, padx=5)
-        
+        export_btn_csv = ttk.Button(control_frame, text="Export CSV",
+            command=lambda: self.export_player_stats_to_file_sync('csv'))
+        export_btn_csv.pack(side=tk.LEFT, padx=2)
+        export_btn_json = ttk.Button(control_frame, text="Export JSON",
+            command=lambda: self.export_player_stats_to_file_sync('json'))
+        export_btn_json.pack(side=tk.LEFT, padx=2)
+        export_btn_xlsx = ttk.Button(control_frame, text="Export Excel",
+            command=lambda: self.export_player_stats_to_file_sync('xlsx'))
+        export_btn_xlsx.pack(side=tk.LEFT, padx=2)
+
+        # Team filter controls
+        self.team_filter_var = tk.StringVar()
+        ttk.Label(control_frame, text="Team Abbr:").pack(side=tk.LEFT, padx=2)
+        team_entry = ttk.Entry(control_frame, textvariable=self.team_filter_var, width=6)
+        team_entry.pack(side=tk.LEFT, padx=2)
+        apply_team_filter_btn = ttk.Button(control_frame, text="Apply Team Filter", command=self.apply_team_filter)
+        apply_team_filter_btn.pack(side=tk.LEFT, padx=2)
+        clear_team_filter_btn = ttk.Button(control_frame, text="Clear Filter", command=self.clear_team_filter)
+        clear_team_filter_btn.pack(side=tk.LEFT, padx=2)
+
         self.stats_notebook.bind("<<NotebookTabChanged>>", self.on_stats_tab_change)
 
         self.player_stats_updated_var = tk.StringVar()
@@ -272,17 +455,47 @@ class NFLStatsApp:
         updated_label = ttk.Label(control_frame, textvariable=self.player_stats_updated_var)
         updated_label.pack(side=tk.RIGHT, padx=5)
 
-    
-    def start_background_loop(self):
+    def apply_team_filter(self) -> None:
+        selected_category_tab = self.stats_notebook.index(self.stats_notebook.select())
+        categories = list(STAT_CATEGORIES.keys())
+        if selected_category_tab >= len(categories):
+            return
+        category = categories[selected_category_tab]
+        team_abbr = self.team_filter_var.get().strip().upper()
+        if not team_abbr:
+            messagebox.showinfo("Filter", "Please enter a team abbreviation.")
+            return
+        filtered_players = self.filter_players_by_team(category, team_abbr)
+        self.update_player_stats_category_ui(category, filtered_players)
+        self.status_var.set(f"Filtered {STAT_CATEGORIES[category]} by team: {team_abbr}")
+
+    def clear_team_filter(self) -> None:
+        selected_category_tab = self.stats_notebook.index(self.stats_notebook.select())
+        categories = list(STAT_CATEGORIES.keys())
+        if selected_category_tab >= len(categories):
+            return
+        category = categories[selected_category_tab]
+        players = self.current_player_stats.get(category, [])
+        self.update_player_stats_category_ui(category, players)
+        self.status_var.set(f"Cleared team filter for {STAT_CATEGORIES[category]}")
+
+    def start_background_loop(self) -> None:
         asyncio.set_event_loop(self.loop)
         self.loop.run_forever()
     
-    def initial_data_fetch(self):
+    def initial_data_fetch(self) -> None:
         self.status_var.set("Fetching initial data...")
-        asyncio.run_coroutine_threadsafe(self.fetch_and_display_standings(), self.loop)
+        coro = self.fetch_and_display_standings()
+        if not (hasattr(coro, 'cr_code') or hasattr(coro, 'gi_code')):
+            raise RuntimeError("fetch_and_display_standings must be a coroutine!")
+        # Cast to Coroutine for type checker
+        import types
+        if not isinstance(coro, types.CoroutineType):
+            raise RuntimeError("fetch_and_display_standings did not return a coroutine object!")
+        asyncio.run_coroutine_threadsafe(coro, self.loop)
 
     
-    def schedule_refresh(self):
+    def schedule_refresh(self) -> None:
         self.root.after(300000, self.schedule_refresh)
         current_tab = self.tab_control.index(self.tab_control.select())
         if current_tab == 0:
@@ -295,12 +508,18 @@ class NFLStatsApp:
             if selected_category_tab < len(categories):
                 self.refresh_player_stats(selected_year, categories[selected_category_tab])
     
-    def refresh_standings(self, year: str | None = None):
+    def refresh_standings(self, year: Optional[str] = None) -> None:
         self.status_var.set("Refreshing standings...")
-        asyncio.run_coroutine_threadsafe(self.fetch_and_display_standings(year), self.loop)
+        coro = self.fetch_and_display_standings(year)
+        if not (hasattr(coro, 'cr_code') or hasattr(coro, 'gi_code')):
+            raise RuntimeError("fetch_and_display_standings must be a coroutine!")
+        import types
+        if not isinstance(coro, types.CoroutineType):
+            raise RuntimeError("fetch_and_display_standings did not return a coroutine object!")
+        asyncio.run_coroutine_threadsafe(coro, self.loop)
     
     @log_operation
-    async def fetch_and_display_standings(self, year: str | None = None):
+    async def fetch_and_display_standings(self, year: Optional[str] = None) -> None:
         try:
             standings_data = await update_standings(year)
             self.current_standings = standings_data
@@ -316,7 +535,7 @@ class NFLStatsApp:
             self.root.after(0, lambda: self.status_var.set(f"Error updating standings: {str(e)}"))
     
     
-    def update_standings_ui(self, standings_data: Dict[str, List[Dict[str, Any]]]):
+    def update_standings_ui(self, standings_data: Dict[str, List[Dict[str, Any]]]) -> None:
         for item in self.standings_tree.get_children():
             self.standings_tree.delete(item)
         
@@ -377,7 +596,7 @@ class NFLStatsApp:
                 self.standings_tree.item(division_id, open=True)
 
     
-    def on_team_click(self, event):
+    def on_team_click(self, event: Any) -> None:
         item_id = self.standings_tree.identify('item', event.x, event.y)
         if not item_id:
             return
@@ -400,7 +619,7 @@ class NFLStatsApp:
         if team_data:
             self.show_team_details(team_data)
     
-    def show_team_details(self, team_data):
+    def show_team_details(self, team_data: Dict[str, Any]) -> None:
         details_window = tk.Toplevel(self.root)
         details_window.title(f"{team_data['name']} Details")
         details_window.geometry("500x350")
@@ -436,12 +655,18 @@ class NFLStatsApp:
         
         ttk.Button(details_window, text="Close", command=details_window.destroy).pack(pady=20)
 
-    def refresh_player_stats(self, category: str, year: str | None = None):
+    def refresh_player_stats(self, category: str, year: Optional[str] = None) -> None:
         self.status_var.set(f"Loading {STAT_CATEGORIES[category]} data...")
-        asyncio.run_coroutine_threadsafe(self.fetch_and_display_player_stats(year, category), self.loop)
+        coro = self.fetch_and_display_player_stats(year, category)
+        if not (hasattr(coro, 'cr_code') or hasattr(coro, 'gi_code')):
+            raise RuntimeError("fetch_and_display_player_stats must be a coroutine!")
+        import types
+        if not isinstance(coro, types.CoroutineType):
+            raise RuntimeError("fetch_and_display_player_stats did not return a coroutine object!")
+        asyncio.run_coroutine_threadsafe(coro, self.loop)
 
     @log_operation
-    async def fetch_and_display_player_stats(self, year: str | None, category: str):
+    async def fetch_and_display_player_stats(self, year: Optional[str], category: str) -> None:
         try:
             stats_data = await fetch_stats_leaders(year, category)
             
@@ -461,7 +686,7 @@ class NFLStatsApp:
         except Exception as e:
             self.root.after(0, lambda: self.status_var.set(f"Error updating {STAT_CATEGORIES[category]} data: {str(e)}"))
 
-    def update_player_stats_category_ui(self, category, players):
+    def update_player_stats_category_ui(self, category: str, players: List[Dict[str, Any]]) -> None:
         if category not in self.stat_trees:
             return
             
@@ -484,7 +709,7 @@ class NFLStatsApp:
                 tags=(str(player['athlete_id']),)
             )
 
-    def on_player_click(self, event, category):
+    def on_player_click(self, event: Any, category: str) -> None:
         tree = self.stat_trees[category]
         item_id = tree.identify('item', event.x, event.y)
         if not item_id:
@@ -501,7 +726,7 @@ class NFLStatsApp:
         if player_data:
             self.show_player_details(player_data)
 
-    def show_player_details(self, player_data):
+    def show_player_details(self, player_data: Dict[str, Any]) -> None:
         details_window = tk.Toplevel(self.root)
         details_window.title(f"{player_data['name']} Details")
         details_window.geometry("600x400")
@@ -534,17 +759,22 @@ class NFLStatsApp:
         
         ttk.Button(details_window, text="Close", command=details_window.destroy).pack(pady=20)
 
-    def load_photo(self, parent_widget, url):
+    def load_photo(self, parent_widget: tk.Widget, url: str) -> None:
         for widget in parent_widget.winfo_children():
             widget.destroy()
-        
         loading_label = ttk.Label(parent_widget, text="Loading...")
         loading_label.pack(expand=True, fill=tk.BOTH)
-        
-        asyncio.run_coroutine_threadsafe(
-            self.fetch_and_display_logo(parent_widget, url), self.loop)
+        # Ensure coroutine object for run_coroutine_threadsafe
+        coro = self.fetch_and_display_logo(parent_widget, url)
+        if not (hasattr(coro, 'cr_code') or hasattr(coro, 'gi_code')):
+            raise RuntimeError("fetch_and_display_logo must be a coroutine!")
+        # Cast to Coroutine for type checker
+        import types
+        if not isinstance(coro, types.CoroutineType):
+            raise RuntimeError("fetch_and_display_logo did not return a coroutine object!")
+        asyncio.run_coroutine_threadsafe(coro, self.loop)
 
-    async def fetch_and_display_logo(self, parent_widget, url):
+    async def fetch_and_display_logo(self, parent_widget: tk.Widget, url: str) -> None:
         try:
             image = await fetch_image(url)
             if image:
@@ -553,46 +783,46 @@ class NFLStatsApp:
             self.root.after(0, lambda: self.update_logo_widget(
                 parent_widget, None, f"Error: {str(e)}"))
 
-    def update_logo_widget(self, parent_widget, image_data, error_text=None):
+    def update_logo_widget(self, parent_widget: tk.Widget, image_data: Any, error_text: Optional[str] = None) -> None:
         for widget in parent_widget.winfo_children():
             widget.destroy()
-        
         if error_text:
+            logging.error(f"Logo/Image error: {error_text}")
             error_label = ttk.Label(parent_widget, text=error_text, wraplength=90)
             error_label.place(relx=0.5, rely=0.5, anchor="center")
             return
-        
         if not image_data:
+            logging.error("Logo/Image not available for widget.")
             na_label = ttk.Label(parent_widget, text="Logo not\navailable")
             na_label.place(relx=0.5, rely=0.5, anchor="center")
             return
-        
         try:
             img = Image.open(BytesIO(image_data))
             img = img.resize((100, 100), Image.Resampling.LANCZOS)
-            
             photo = ImageTk.PhotoImage(img)
-            
-            if not hasattr(parent_widget, 'image_references'):
-                parent_widget.image_references = []
-            parent_widget.image_references.append(photo)
-            
+            # Use a dict to store image references to avoid attribute error
+            if not hasattr(parent_widget, '_image_references'):
+                setattr(parent_widget, '_image_references', [])
+            getattr(parent_widget, '_image_references').append(photo)
             logo_label = ttk.Label(parent_widget, image=photo)
             logo_label.place(relx=0.5, rely=0.5, anchor="center")
         except Exception as e:
+            logging.error(f"Exception in update_logo_widget: {str(e)}")
             error_label = ttk.Label(parent_widget, text=f"Error: {str(e)}", wraplength=90)
             error_label.place(relx=0.5, rely=0.5, anchor="center")
 
 
     @validate_data
-    async def export_player_stats_to_csv(self):
+    async def export_player_stats_to_csv(self) -> None:
         if not hasattr(self, 'current_player_stats') or not self.current_player_stats:
+            logging.error("No player stats data to export.")
             self.root.after(0, lambda: messagebox.showinfo("Export", "No player stats data to export"))
             return
         
         current_tab = self.stats_notebook.index(self.stats_notebook.select())
         categories = list(STAT_CATEGORIES.keys())
         if current_tab >= len(categories):
+            logging.error("No stat category selected for export.")
             self.root.after(0, lambda: messagebox.showinfo("Export", "Please select a stat category"))
             return
         
@@ -600,8 +830,18 @@ class NFLStatsApp:
         players = self.current_player_stats.get(current_category, [])
         
         if not players:
+            logging.error(f"No data to export for category: {current_category}")
             self.root.after(0, lambda: messagebox.showinfo("Export", "No data to export for this category"))
             return
+        
+        # Check for required fields in player data
+        required_fields = ["name", "position", "team", "team_abbr", "value", "rank"]
+        for player in players:
+            for field in required_fields:
+                if field not in player or player[field] in (None, ""):
+                    logging.error(f"Player data missing required field '{field}': {player}")
+                    self.root.after(0, lambda: messagebox.showerror("Export Error", f"Player data missing required field '{field}'."))
+                    return
         
         filename_future = asyncio.Future()
         self.root.after(0, lambda: self._get_save_filename(filename_future, f"NFL_{STAT_CATEGORIES[current_category]}_Leaders"))
@@ -609,25 +849,28 @@ class NFLStatsApp:
         filename = await filename_future
         
         if not filename:
+            logging.error("No filename provided for player stats export.")
             return
         
-        csv_handler = NFLDataCSVHandler()
-        success = await csv_handler.save_to_csv(players, filename)
+        csv_handler = CSVDataExporter()
+        success = await csv_handler.save(players, filename)
         
         if success:
             self.root.after(0, lambda: messagebox.showinfo("Export", "Data exported successfully"))
         else:
+            logging.error("Failed to export player stats data to CSV.")
             self.root.after(0, lambda: messagebox.showerror("Export Error", "Failed to export data"))
 
     
     @validate_data
-    async def export_standings_to_csv(self):
-        if not self.current_standings:
+    async def export_standings_to_csv(self) -> None:
+        # Export only filtered standings if filter is active
+        standings_to_export = getattr(self, 'filtered_standings', None) or self.current_standings
+        if not standings_to_export:
             self.root.after(0, lambda: messagebox.showinfo("Export", "No standings data to export"))
             return
-        
         flat_data = []
-        for division, teams in self.current_standings.items():
+        for division, teams in standings_to_export.items():
             for team in teams:
                 team_copy = team.copy()
                 team_copy['division'] = division
@@ -642,15 +885,15 @@ class NFLStatsApp:
         if not filename:
             return
         
-        csv_handler = NFLDataCSVHandler()
-        success = await csv_handler.save_to_csv(flat_data, filename)
+        csv_handler = CSVDataExporter()
+        success = await csv_handler.save(flat_data, filename)
         
         if success:
             self.root.after(0, lambda: messagebox.showinfo("Export", "Data exported successfully"))
         else:
             self.root.after(0, lambda: messagebox.showerror("Export Error", "Failed to export data"))
 
-    def _get_save_filename(self, future, default_name="NFL_Stats"):
+    def _get_save_filename(self, future: asyncio.Future, default_name: str = "NFL_Stats") -> None:
         filename = filedialog.asksaveasfilename(
             defaultextension=".csv",
             filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
@@ -659,27 +902,261 @@ class NFLStatsApp:
         )
         future.set_result(filename)
 
+    async def export_player_stats_to_file(self, filetype: str = 'csv') -> None:
+        if not hasattr(self, 'current_player_stats') or not self.current_player_stats:
+            logging.error("No player stats data to export.")
+            self.root.after(0, lambda: messagebox.showinfo("Export", "No player stats data to export"))
+            return
+        current_tab = self.stats_notebook.index(self.stats_notebook.select())
+        categories = list(STAT_CATEGORIES.keys())
+        if current_tab >= len(categories):
+            logging.error("No stat category selected for export.")
+            self.root.after(0, lambda: messagebox.showinfo("Export", "Please select a stat category"))
+            return
+        current_category = categories[current_tab]
+        players = self.current_player_stats.get(current_category, [])
+        if not players:
+            logging.error(f"No data to export for category: {current_category}")
+            self.root.after(0, lambda: messagebox.showinfo("Export", "No data to export for this category"))
+            return
+        required_fields = ["name", "position", "team", "team_abbr", "value", "rank"]
+        for player in players:
+            for field in required_fields:
+                if field not in player or player[field] in (None, ""):
+                    logging.error(f"Player data missing required field '{field}': {player}")
+                    self.root.after(0, lambda: messagebox.showerror("Export Error", f"Player data missing required field '{field}'."))
+                    return
+        filename_future = asyncio.Future()
+        default_name = f"NFL_{STAT_CATEGORIES[current_category]}_Leaders"
+        self.root.after(0, lambda: self._get_save_filename_ext(filename_future, default_name, filetype))
+        filename = await filename_future
+        if not filename:
+            logging.error("No filename provided for player stats export.")
+            return
+        if filetype == 'csv':
+            exporter = CSVDataExporter()
+        elif filetype == 'json':
+            exporter = JSONDataExporter()
+        elif filetype == 'xlsx':
+            exporter = ExcelDataExporter()
+        else:
+            logging.error(f"Unsupported export filetype: {filetype}")
+            self.root.after(0, lambda: messagebox.showerror("Export Error", f"Unsupported filetype: {filetype}"))
+            return
+        success = await exporter.save(players, filename)
+        if success:
+            self.root.after(0, lambda: messagebox.showinfo("Export", f"Data exported successfully as {filetype.upper()}"))
+        else:
+            logging.error(f"Failed to export player stats data to {filetype.upper()}.")
+            self.root.after(0, lambda: messagebox.showerror("Export Error", f"Failed to export data as {filetype.upper()}"))
 
-def run_asyncio_loop(loop):
+    async def export_standings_to_file(self, filetype: str = 'csv') -> None:
+        standings_to_export = getattr(self, 'filtered_standings', None) or self.current_standings
+        if not standings_to_export:
+            self.root.after(0, lambda: messagebox.showinfo("Export", "No standings data to export"))
+            return
+        flat_data = []
+        for division, teams in standings_to_export.items():
+            for team in teams:
+                team_copy = team.copy()
+                team_copy['division'] = division
+                flat_data.append(team_copy)
+        filename_future = asyncio.Future()
+        self.root.after(0, lambda: self._get_save_filename_ext(filename_future, "NFL_Standings", filetype))
+        filename = await filename_future
+        if not filename:
+            return
+        if filetype == 'csv':
+            exporter = CSVDataExporter()
+        elif filetype == 'json':
+            exporter = JSONDataExporter()
+        elif filetype == 'xlsx':
+            exporter = ExcelDataExporter()
+        else:
+            logging.error(f"Unsupported export filetype: {filetype}")
+            self.root.after(0, lambda: messagebox.showerror("Export Error", f"Unsupported filetype: {filetype}"))
+            return
+        success = await exporter.save(flat_data, filename)
+        if success:
+            self.root.after(0, lambda: messagebox.showinfo("Export", f"Data exported successfully as {filetype.upper()}"))
+        else:
+            self.root.after(0, lambda: messagebox.showerror("Export Error", f"Failed to export data as {filetype.upper()}"))
+
+    def _get_save_filename_ext(self, future: asyncio.Future, default_name: str, filetype: str) -> None:
+        if filetype == 'csv':
+            ext = '.csv'
+            filetypes = [("CSV files", "*.csv"), ("All files", "*")]
+        elif filetype == 'json':
+            ext = '.json'
+            filetypes = [("JSON files", "*.json"), ("All files", "*")]
+        elif filetype == 'xlsx':
+            ext = '.xlsx'
+            filetypes = [("Excel files", "*.xlsx"), ("All files", "*")]
+        else:
+            ext = ''
+            filetypes = [("All files", "*")]
+        filename = filedialog.asksaveasfilename(
+            defaultextension=ext,
+            filetypes=filetypes,
+            title="Save Data",
+            initialfile=default_name
+        )
+        future.set_result(filename)
+
+    def filter_players_by_team(self, category: str, team_abbr: str) -> List[Dict[str, Any]]:
+        if not hasattr(self, 'current_player_stats'):
+            return []
+        players = self.current_player_stats.get(category, [])
+        team_abbr_lower = team_abbr.lower()
+        team_filter = create_filter(lambda p: team_abbr_lower in p['team_abbr'].lower())
+        return team_filter(players)
+
+    def filter_teams_by_division(self, division_name: str, min_wins: int = 0) -> List[Dict[str, Any]]:
+        if not hasattr(self, 'current_standings'):
+            return []
+        division_teams = self.current_standings.get(division_name, [])
+        win_filter = create_filter(lambda t: t['wins'] >= min_wins)
+        return win_filter(division_teams)
+    
+    def export_player_stats_to_file_sync(self, filetype: str = 'csv') -> None:
+        # Synchronous method to be called from the UI (main thread)
+        if not hasattr(self, 'current_player_stats') or not self.current_player_stats:
+            logging.error("No player stats data to export.")
+            messagebox.showinfo("Export", "No player stats data to export")
+            return
+        current_tab = self.stats_notebook.index(self.stats_notebook.select())
+        categories = list(STAT_CATEGORIES.keys())
+        if current_tab >= len(categories):
+            logging.error("No stat category selected for export.")
+            messagebox.showinfo("Export", "Please select a stat category")
+            return
+        current_category = categories[current_tab]
+        players = self.current_player_stats.get(current_category, [])
+        if not players:
+            logging.error(f"No data to export for category: {current_category}")
+            messagebox.showinfo("Export", "No data to export for this category")
+            return
+        required_fields = ["name", "position", "team", "team_abbr", "value", "rank"]
+        for player in players:
+            for field in required_fields:
+                if field not in player or player[field] in (None, ""):
+                    logging.error(f"Player data missing required field '{field}': {player}")
+                    messagebox.showerror("Export Error", f"Player data missing required field '{field}'.")
+                    return
+        default_name = f"NFL_{STAT_CATEGORIES[current_category]}_Leaders"
+        # File dialog on main thread
+        if filetype == 'csv':
+            ext = '.csv'
+            filetypes = [("CSV files", "*.csv"), ("All files", "*.*")]
+            exporter = CSVDataExporter()
+        elif filetype == 'json':
+            ext = '.json'
+            filetypes = [("JSON files", "*.json"), ("All files", "*.*")]
+            exporter = JSONDataExporter()
+        elif filetype == 'xlsx':
+            ext = '.xlsx'
+            filetypes = [("Excel files", "*.xlsx"), ("All files", "*.*")]
+            exporter = ExcelDataExporter()
+        else:
+            logging.error(f"Unsupported export filetype: {filetype}")
+            messagebox.showerror("Export Error", f"Unsupported filetype: {filetype}")
+            return
+        filename = filedialog.asksaveasfilename(
+            defaultextension=ext,
+            filetypes=filetypes,
+            title="Save Data",
+            initialfile=default_name
+        )
+        if not filename:
+            logging.info("Export cancelled by user.")
+            return
+        # Run export in a thread
+        def do_export():
+            try:
+                # Run the async exporter in a new event loop in this thread
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                success = loop.run_until_complete(exporter.save(players, filename))
+                loop.close()
+                if success:
+                    self.root.after(0, lambda: messagebox.showinfo("Export", f"Data exported successfully as {filetype.upper()}"))
+                else:
+                    self.root.after(0, lambda: messagebox.showerror("Export Error", f"Failed to export data as {filetype.upper()}"))
+            except Exception as e:
+                logging.error(f"Exception during export: {e}")
+                self.root.after(0, lambda: messagebox.showerror("Export Error", f"Failed to export data: {e}"))
+        threading.Thread(target=do_export, daemon=True).start()
+
+    def export_standings_to_file_sync(self, filetype: str = 'csv') -> None:
+        # Synchronous method to be called from the UI (main thread)
+        standings_to_export = getattr(self, 'filtered_standings', None) or self.current_standings
+        if not standings_to_export:
+            logging.error("No standings data to export.")
+            messagebox.showinfo("Export", "No standings data to export")
+            return
+        flat_data = []
+        for division, teams in standings_to_export.items():
+            for team in teams:
+                team_copy = team.copy()
+                team_copy['division'] = division
+                flat_data.append(team_copy)
+        if filetype == 'csv':
+            ext = '.csv'
+            filetypes = [("CSV files", "*.csv"), ("All files", "*.*")]
+            exporter = CSVDataExporter()
+        elif filetype == 'json':
+            ext = '.json'
+            filetypes = [("JSON files", "*.json"), ("All files", "*.*")]
+            exporter = JSONDataExporter()
+        elif filetype == 'xlsx':
+            ext = '.xlsx'
+            filetypes = [("Excel files", "*.xlsx"), ("All files", "*.*")]
+            exporter = ExcelDataExporter()
+        else:
+            logging.error(f"Unsupported export filetype: {filetype}")
+            messagebox.showerror("Export Error", f"Unsupported filetype: {filetype}")
+            return
+        filename = filedialog.asksaveasfilename(
+            defaultextension=ext,
+            filetypes=filetypes,
+            title="Save Data",
+            initialfile="NFL_Standings"
+        )
+        if not filename:
+            logging.info("Export cancelled by user.")
+            return
+        def do_export():
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                logging.info(f"Exporting standings to {filename} as {filetype.upper()}...")
+                success = loop.run_until_complete(exporter.save(flat_data, filename))
+                loop.close()
+                if success:
+                    logging.info(f"Standings exported successfully to {filename} as {filetype.upper()}.")
+                    self.root.after(0, lambda: messagebox.showinfo("Export", f"Data exported successfully as {filetype.upper()}"))
+                else:
+                    self.root.after(0, lambda: messagebox.showerror("Export Error", f"Failed to export data as {filetype.upper()}"))
+            except Exception as e:
+                logging.error(f"Exception during export: {e}")
+                self.root.after(0, lambda: messagebox.showerror("Export Error", f"Failed to export data: {e}"))
+        threading.Thread(target=do_export, daemon=True).start()
+    
+def run_asyncio_loop(loop: asyncio.AbstractEventLoop) -> None:
     asyncio.set_event_loop(loop)
     loop.run_forever()
 
 if __name__ == "__main__":
+    setup_logging()
     root = tk.Tk()
-
     root.tk.call("source", "azure.tcl")
     root.tk.call("set_theme", "light")
-    
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    
-    threading_loop = threading.Thread(target=run_asyncio_loop, args=(loop,),
-                                      daemon=True)
+    threading_loop = threading.Thread(target=run_asyncio_loop, args=(loop,), daemon=True)
     threading_loop.start()
-    
     app = NFLStatsApp(root)
     root.mainloop()
-    
     loop.call_soon_threadsafe(loop.stop)
     threading_loop.join()
     loop.close()

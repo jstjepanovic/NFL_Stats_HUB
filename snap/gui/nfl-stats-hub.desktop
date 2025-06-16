@@ -1,8 +1,0 @@
-[Desktop Entry]
-Name=NFL Stats Hub
-Comment=NFL Standings and Player Stats App
-Exec=nfl-stats-hub
-Icon=\${SNAP}/meta/gui/nfl-stats-hub.png
-Terminal=false
-Type=Application
-Categories=Utility;Sports;

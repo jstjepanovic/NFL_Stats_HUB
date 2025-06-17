@@ -26,8 +26,10 @@ def setup_logging() -> None:
     now = datetime.now()
     log_dir = os.path.join("logs", now.strftime("%Y-%m-%d"))
     os.makedirs(log_dir, exist_ok=True)
-    log_filename = os.path.join(log_dir,
-                                now.strftime("run_%Y-%m-%d_%H-%M-%S.log"))
+    log_filename = os.path.join(
+        log_dir,
+        now.strftime("run_%Y-%m-%d_%H-%M-%S.log")
+    )
 
     logging.basicConfig(
         level=logging.INFO,
@@ -57,23 +59,53 @@ def validate_data(func: Callable[..., Awaitable[Any]]
         logging.info(f"Validating data before {func.__name__}")
         self = args[0] if args else None
         if self is None:
-            logging.error("validate_data:" \
-                        "No self instance found for validation.")
+            logging.error(
+                "validate_data: No self instance found for validation."
+            )
             return
         if func.__name__ == 'export_player_stats_to_csv':
-            if not hasattr(self, 'current_player_stats') or not self.current_player_stats:
-                logging.error("No player stats data to export (validation failed).")
-                self.root.after(0, lambda: messagebox.showerror("Export Error", "No player stats data to export (validation failed)."))
+            if (not hasattr(self, 'current_player_stats') or
+                not self.current_player_stats):
+                logging.error(
+                    "No player stats data to export (validation failed)."
+                )
+                self.root.after(
+                    0,
+                    lambda: messagebox.showerror(
+                        "Export Error",
+                        "No player stats data to export (validation failed)."
+                    )
+                )
                 return
             if not hasattr(self, 'stats_notebook'):
-                logging.error("No stats_notebook attribute found (validation failed).")
-                self.root.after(0, lambda: messagebox.showerror("Export Error", "Internal error: stats_notebook missing (validation failed)."))
+                logging.error(
+                    "No stats_notebook attribute found (validation failed)."
+                )
+                self.root.after(
+                    0,
+                    lambda: messagebox.showerror(
+                        "Export Error",
+                        "Internal error: stats_notebook missing "
+                        "(validation failed)."
+                    )
+                )
                 return
-            current_tab = self.stats_notebook.index(self.stats_notebook.select())
+            current_tab = self.stats_notebook.index(
+            self.stats_notebook.select()
+            )
             categories = list(STAT_CATEGORIES.keys())
             if current_tab >= len(categories):
-                logging.error("No stat category selected for export (validation failed).")
-                self.root.after(0, lambda: messagebox.showerror("Export Error", "Please select a stat category (validation failed)."))
+                logging.error(
+                    "No stat category selected for export "
+                    "(validation failed)."
+                )
+                self.root.after(
+                    0,
+                    lambda: messagebox.showerror(
+                        "Export Error",
+                        "Please select a stat category (validation failed)."
+                    )
+                )
                 return
             current_category = categories[current_tab]
             players = self.current_player_stats.get(current_category, [])
@@ -105,12 +137,14 @@ def validate_data(func: Callable[..., Awaitable[Any]]
                             0,
                             lambda: messagebox.showerror(
                                 "Export Error",
-                                f"Player data missing required field '{field}'.",
+                                f"Player data missing required field "
+                                f"'{field}'.",
                             )
                         )
                         return
-        elif func.__name__ == 'export_standings_to_csv':
-            if not hasattr(self, 'current_standings') or not self.current_standings:
+        if func.__name__ == 'export_standings_to_csv':
+            if (not hasattr(self, 'current_standings') or
+                not self.current_standings):
                 logging.error(
                     "No standings data to export (validation failed)."
                 )
@@ -130,7 +164,8 @@ def validate_data(func: Callable[..., Awaitable[Any]]
                     flat_data.append(team_copy)
             if not flat_data:
                 logging.error(
-                    "No flattened standings data to export (validation failed)."
+                    "No flattened standings data to export "
+                    "(validation failed)."
                 )
                 self.root.after(
                     0,
@@ -148,7 +183,8 @@ def validate_data(func: Callable[..., Awaitable[Any]]
                 for field in required_fields:
                     if field not in team or team[field] in (None, ""):
                         logging.error(
-                            f"Team data missing required field '{field}': {team}"
+                            f"Team data missing required field '{field}': "
+                            f"{team}"
                         )
                         self.root.after(
                             0,
@@ -158,8 +194,9 @@ def validate_data(func: Callable[..., Awaitable[Any]]
                             )
                         )
                         return
-        result = await func(*args, **kwargs)
-        return result
+            result = await func(*args, **kwargs)
+            return result
+        return await func(*args, **kwargs)
     return wrapper
 
 
@@ -174,14 +211,18 @@ class NFLStatsApp:
         self.root = root
         self.root.title("NFL STATS HUB")
         self.root.geometry("1200x800")
-        self.root.bind('<Escape>', lambda _: self.root.attributes('-fullscreen', False))
+        self.root.bind(
+            '<Escape>',
+            lambda _: self.root.attributes('-fullscreen', False)
+        )
         
         self.current_standings: Dict[str, List[Dict[str, Any]]] = {}
         
         self.setup_ui()
         
         self.loop = asyncio.new_event_loop()
-        self.thread = threading.Thread(target=self.start_background_loop, daemon=True)
+        self.thread = threading.Thread(target=self.start_background_loop,
+                                       daemon=True)
         self.thread.start()
         
         self.root.after(100, self.initial_data_fetch)
@@ -206,8 +247,12 @@ class NFLStatsApp:
         current_year = datetime.now().year
         years = [str(year) for year in range(2004, current_year)]
         self.year_var = tk.StringVar()
-        self.year_dropdown = ttk.Combobox(self.year_frame, textvariable=self.year_var, 
-                                    values=years, state='readonly')
+        self.year_dropdown = ttk.Combobox(
+            self.year_frame,
+            textvariable=self.year_var,
+            values=years,
+            state='readonly'
+        )
         self.year_dropdown.set(str(current_year - 1))
         self.year_dropdown.pack(side=tk.LEFT, padx=5)
 
@@ -235,7 +280,12 @@ class NFLStatsApp:
         # Status bar
         self.status_var = tk.StringVar()
         self.status_var.set("Ready")
-        self.status_bar = ttk.Label(self.root, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W)
+        self.status_bar = ttk.Label(
+            self.root,
+            textvariable=self.status_var,
+            relief=tk.SUNKEN,
+            anchor=tk.W
+        )
         self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
 
     def on_year_change(self, event: Any) -> None:
@@ -305,14 +355,23 @@ class NFLStatsApp:
         refresh_btn = ttk.Button(control_frame, text="Refresh Data", command=self.refresh_standings)
         refresh_btn.pack(side=tk.LEFT, padx=5)
         
-        export_btn_csv = ttk.Button(control_frame, text="Export CSV", 
-            command=lambda: self.export_standings_to_file_sync('csv'))
+        export_btn_csv = ttk.Button(
+            control_frame,
+            text="Export CSV",
+            command=lambda: self.export_standings_to_file_sync('csv')
+        )
         export_btn_csv.pack(side=tk.LEFT, padx=2)
-        export_btn_json = ttk.Button(control_frame, text="Export JSON", 
-            command=lambda: self.export_standings_to_file_sync('json'))
+        export_btn_json = ttk.Button(
+            control_frame,
+            text="Export JSON",
+            command=lambda: self.export_standings_to_file_sync('json')
+        )
         export_btn_json.pack(side=tk.LEFT, padx=2)
-        export_btn_xlsx = ttk.Button(control_frame, text="Export Excel", 
-            command=lambda: self.export_standings_to_file_sync('xlsx'))
+        export_btn_xlsx = ttk.Button(
+            control_frame,
+            text="Export Excel",
+            command=lambda: self.export_standings_to_file_sync('xlsx')
+        )
         export_btn_xlsx.pack(side=tk.LEFT, padx=2)
 
         self.division_filter_var = tk.StringVar()
@@ -320,24 +379,43 @@ class NFLStatsApp:
 
         ttk.Label(control_frame, text="Division:").pack(side=tk.LEFT, padx=2)
 
-        division_entry = ttk.Entry(control_frame, textvariable=self.division_filter_var, width=12)
+        division_entry = ttk.Entry(
+            control_frame,
+            textvariable=self.division_filter_var,
+            width=12
+        )
         division_entry.pack(side=tk.LEFT, padx=2)
 
         ttk.Label(control_frame, text="Min Wins:").pack(side=tk.LEFT, padx=2)
 
-        min_wins_entry = ttk.Entry(control_frame, textvariable=self.min_wins_var, width=4)
+        min_wins_entry = ttk.Entry(
+            control_frame,
+            textvariable=self.min_wins_var,
+            width=4
+        )
         min_wins_entry.pack(side=tk.LEFT, padx=2)
 
-        apply_div_filter_btn = ttk.Button(control_frame, text="Apply Filter", command=self.apply_division_filter)
+        apply_div_filter_btn = ttk.Button(
+            control_frame,
+            text="Apply Filter",
+            command=self.apply_division_filter
+        )
         apply_div_filter_btn.pack(side=tk.LEFT, padx=2)
 
-        clear_div_filter_btn = ttk.Button(control_frame, text="Clear Filter", command=self.clear_division_filter)
+        clear_div_filter_btn = ttk.Button(
+            control_frame,
+            text="Clear Filter",
+            command=self.clear_division_filter
+        )
         clear_div_filter_btn.pack(side=tk.LEFT, padx=2)
 
         self.standings_updated_var = tk.StringVar()
         self.standings_updated_var.set("Last updated: Never")
         
-        updated_label = ttk.Label(control_frame, textvariable=self.standings_updated_var)
+        updated_label = ttk.Label(
+            control_frame,
+            textvariable=self.standings_updated_var
+        )
         updated_label.pack(side=tk.RIGHT, padx=5)
 
     def apply_division_filter(self) -> None:
@@ -382,7 +460,12 @@ class NFLStatsApp:
     
     def setup_player_stats_tab(self) -> None:
         self.stats_notebook = ttk.Notebook(self.player_stats_tab)
-        self.stats_notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.stats_notebook.pack(
+            fill=tk.BOTH,
+            expand=True,
+            padx=10,
+            pady=10
+        )
         
         self.stat_frames = {}
         self.stat_trees = {}
@@ -395,7 +478,11 @@ class NFLStatsApp:
             self.stats_notebook.add(frame, text=display_name)
             
             columns = ("Rank", "Player", "Position", "Team", "Value")
-            tree = ttk.Treeview(frame, columns=columns, show="headings")
+            tree = ttk.Treeview(
+                frame,
+                columns=columns,
+                show="headings"
+            )
             
             tree.heading("Rank", text="Rank")
             tree.heading("Player", text="Player")
@@ -409,7 +496,11 @@ class NFLStatsApp:
             tree.column("Team", width=100, anchor=tk.CENTER)
             tree.column("Value", width=100, anchor=tk.CENTER)
             
-            scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=tree.yview)
+            scrollbar = ttk.Scrollbar(
+                frame,
+                orient=tk.VERTICAL,
+                command=tree.yview
+            )
             tree.configure(yscrollcommand=scrollbar.set)
             
             tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -420,39 +511,74 @@ class NFLStatsApp:
             tree.bind("<Double-1>", lambda e, cat=category: self.on_player_click(e, cat))
         
         control_frame = ttk.Frame(self.player_stats_tab)
-        control_frame.pack(fill=tk.X, padx=10, pady=5)
+        control_frame.pack(
+            fill=tk.X,
+            padx=10,
+            pady=5
+        )
         
         selected_category_tab = self.stats_notebook.index(self.stats_notebook.select())
         categories = list(STAT_CATEGORIES.keys())
         selected_year = self.year_var.get()
-        refresh_btn = ttk.Button(control_frame, text="Refresh Stats", command=lambda: self.refresh_player_stats(selected_year, categories[selected_category_tab]))
+        refresh_btn = ttk.Button(
+            control_frame,
+            text="Refresh Stats",
+            command=lambda: self.refresh_player_stats(
+                selected_year,
+                categories[selected_category_tab]
+            )
+        )
         refresh_btn.pack(side=tk.LEFT, padx=5)
     
-        export_btn_csv = ttk.Button(control_frame, text="Export CSV",
-            command=lambda: self.export_player_stats_to_file_sync('csv'))
+        export_btn_csv = ttk.Button(
+            control_frame,
+            text="Export CSV",
+            command=lambda: self.export_player_stats_to_file_sync('csv')
+        )
         export_btn_csv.pack(side=tk.LEFT, padx=2)
-        export_btn_json = ttk.Button(control_frame, text="Export JSON",
-            command=lambda: self.export_player_stats_to_file_sync('json'))
+        export_btn_json = ttk.Button(
+            control_frame,
+            text="Export JSON",
+            command=lambda: self.export_player_stats_to_file_sync('json')
+        )
         export_btn_json.pack(side=tk.LEFT, padx=2)
-        export_btn_xlsx = ttk.Button(control_frame, text="Export Excel",
-            command=lambda: self.export_player_stats_to_file_sync('xlsx'))
+        export_btn_xlsx = ttk.Button(
+            control_frame,
+            text="Export Excel",
+            command=lambda: self.export_player_stats_to_file_sync('xlsx')
+        )
         export_btn_xlsx.pack(side=tk.LEFT, padx=2)
 
         # Team filter controls
         self.team_filter_var = tk.StringVar()
         ttk.Label(control_frame, text="Team Abbr:").pack(side=tk.LEFT, padx=2)
-        team_entry = ttk.Entry(control_frame, textvariable=self.team_filter_var, width=6)
+        team_entry = ttk.Entry(
+            control_frame,
+            textvariable=self.team_filter_var,
+            width=6
+        )
         team_entry.pack(side=tk.LEFT, padx=2)
-        apply_team_filter_btn = ttk.Button(control_frame, text="Apply Team Filter", command=self.apply_team_filter)
+        apply_team_filter_btn = ttk.Button(
+            control_frame,
+            text="Apply Team Filter",
+            command=self.apply_team_filter
+        )
         apply_team_filter_btn.pack(side=tk.LEFT, padx=2)
-        clear_team_filter_btn = ttk.Button(control_frame, text="Clear Filter", command=self.clear_team_filter)
+        clear_team_filter_btn = ttk.Button(
+            control_frame,
+            text="Clear Filter",
+            command=self.clear_team_filter
+        )
         clear_team_filter_btn.pack(side=tk.LEFT, padx=2)
 
         self.stats_notebook.bind("<<NotebookTabChanged>>", self.on_stats_tab_change)
 
         self.player_stats_updated_var = tk.StringVar()
         self.player_stats_updated_var.set("Last updated: Never")
-        updated_label = ttk.Label(control_frame, textvariable=self.player_stats_updated_var)
+        updated_label = ttk.Label(
+            control_frame,
+            textvariable=self.player_stats_updated_var
+        )
         updated_label.pack(side=tk.RIGHT, padx=5)
 
     def apply_team_filter(self) -> None:
@@ -738,7 +864,11 @@ class NFLStatsApp:
         headshot__frame.pack(side=tk.LEFT, padx=10)
         headshot__frame.pack_propagate(False)
         
-        headshot_label = ttk.Label(headshot__frame, text="Click to\nload headshot", cursor="hand2")
+        headshot_label = ttk.Label(
+            headshot__frame,
+            text="Click to\nload headshot",
+            cursor="hand2"
+        )
         headshot_label.pack(expand=True, fill=tk.BOTH)
         
         headshot_label.bind("<Button-1>", lambda e: self.load_photo(headshot__frame, player_data['headshot']))
@@ -749,13 +879,30 @@ class NFLStatsApp:
         ttk.Label(player_info_frame, text=f"{player_data['name']}", 
                 font=("Arial", 16, "bold")).pack(pady=10)
         
-        ttk.Label(player_info_frame, text=f"Position: {player_data['position']}").pack(anchor="w", padx=20)
-        ttk.Label(player_info_frame, text=f"Team: {player_data['team']}").pack(anchor="w", padx=20)
-        
-        ttk.Label(player_info_frame, text=f"DoB: {player_data['date_of_birth']}").pack(anchor="w", padx=20)
-        ttk.Label(player_info_frame, text=f"College: {player_data['college']}").pack(anchor="w", padx=20)
-        ttk.Label(player_info_frame, text=f"Draft {player_data['draft']}").pack(anchor="w", padx=20)
-        ttk.Label(player_info_frame, text=f"Debut Year: {player_data['debut_year']}").pack(anchor="w", padx=20)
+        ttk.Label(
+            player_info_frame,
+            text=f"Position: {player_data['position']}"
+        ).pack(anchor="w", padx=20)
+        ttk.Label(
+            player_info_frame,
+            text=f"Team: {player_data['team']}"
+        ).pack(anchor="w", padx=20)
+        ttk.Label(
+            player_info_frame,
+            text=f"DoB: {player_data['date_of_birth']}"
+        ).pack(anchor="w", padx=20)
+        ttk.Label(
+            player_info_frame,
+            text=f"College: {player_data['college']}"
+        ).pack(anchor="w", padx=20)
+        ttk.Label(
+            player_info_frame,
+            text=f"Draft {player_data['draft']}"
+        ).pack(anchor="w", padx=20)
+        ttk.Label(
+            player_info_frame,
+            text=f"Debut Year: {player_data['debut_year']}"
+        ).pack(anchor="w", padx=20)
         
         ttk.Button(details_window, text="Close", command=details_window.destroy).pack(pady=20)
 
@@ -1153,7 +1300,11 @@ if __name__ == "__main__":
     root.tk.call("set_theme", "light")
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    threading_loop = threading.Thread(target=run_asyncio_loop, args=(loop,), daemon=True)
+    threading_loop = threading.Thread(
+        target=run_asyncio_loop,
+        args=(loop,),
+        daemon=True
+    )
     threading_loop.start()
     app = NFLStatsApp(root)
     root.mainloop()

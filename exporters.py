@@ -15,61 +15,51 @@ class DataExporter(ABC):
 
 class CSVDataExporter(DataExporter):
     async def save(self, data: List[dict], filename: str) -> bool:
+        logging.info(f"Exporting data to CSV: {filename}")
         try:
-            logging.info(
-                f"Exporting data to CSV: {filename}"
-            )
             with open(filename, 'w', newline='', encoding='utf-8') as file:
                 writer = csv.writer(file)
                 if data and len(data) > 0:
                     writer.writerow(data[0].keys())
                     for row in data:
                         writer.writerow(row.values())
-            logging.info(
-                f"Successfully exported data to CSV: {filename}"
-            )
-            return True
         except Exception as e:
             logging.error(f"Error saving to CSV: {e}")
             return False
+        logging.info(f"Successfully exported data to CSV: {filename}")
+        return True
 
 
 class JSONDataExporter(DataExporter):
     async def save(self, data: List[dict], filename: str) -> bool:
+        logging.info(f"Exporting data to JSON: {filename}")
         try:
-            logging.info(
-                f"Exporting data to JSON: {filename}"
-            )
             with open(filename, 'w', encoding='utf-8') as file:
                 json.dump(data, file, ensure_ascii=False, indent=2)
-            logging.info(
-                f"Successfully exported data to JSON: {filename}"
-            )
-            return True
         except Exception as e:
             logging.error(f"Error saving to JSON: {e}")
             return False
+        logging.info(f"Successfully exported data to JSON: {filename}")
+        return True
 
 
 class ExcelDataExporter(DataExporter):
     async def save(self, data: List[dict], filename: str) -> bool:
-        if openpyxl is None:
-            logging.error(
-                "openpyxl is not installed. Cannot export to Excel."
-            )
-            return False
+        logging.info(f"Exporting data to Excel: {filename}")
+        
         try:
-            logging.info(
-                f"Exporting data to Excel: {filename}"
-            )
             wb = openpyxl.Workbook()
-            ws = wb.active
-            if ws is None:
-                logging.error(
-                    "Could not get active worksheet from workbook."
-                )
-                return False
-            if data and len(data) > 0:
+        except Exception as e:
+            logging.error(f"Error creating workbook: {e}")
+            return False
+        
+        ws = wb.active
+        if ws is None:
+            logging.error("Could not get active worksheet from workbook.")
+            return False
+        
+        if data and len(data) > 0:
+            try:
                 ws.append(list(data[0].keys()))
                 for row in data:
                     row = [
@@ -77,11 +67,14 @@ class ExcelDataExporter(DataExporter):
                         for v in row.values()
                     ]
                     ws.append(row)
+            except Exception as e:
+                logging.error(f"Error writing data to worksheet: {e}")
+                return False
+        try:
             wb.save(filename)
-            logging.info(
-                f"Successfully exported data to Excel: {filename}"
-            )
-            return True
         except Exception as e:
-            logging.error(f"Error saving to Excel: {e}")
+            logging.error(f"Error saving Excel file: {e}")
             return False
+        
+        logging.info(f"Successfully exported data to Excel: {filename}")
+        return True

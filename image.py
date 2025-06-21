@@ -11,7 +11,5 @@ async def fetch_image(url: str) -> bytes | None:
                     return await response.read()
         return None
     except Exception as e:
-        logging.error(
-            f"Error fetching image: {e}"
-        )
+        logging.error(f"Error fetching image: {e}")
         return None

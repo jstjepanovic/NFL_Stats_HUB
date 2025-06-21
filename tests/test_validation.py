@@ -1,11 +1,8 @@
-# Standard library imports
 import unittest
-from typing import Any, Awaitable
+import types
 
-# Local application imports
 from app import validate_data
 
-import types
 
 class DummyApp:
     def __init__(self):

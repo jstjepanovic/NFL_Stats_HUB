@@ -1,14 +1,17 @@
-# Standard library imports
 import unittest
-from typing import List, Dict, Any
 
-# Local application imports
 from app import create_filter
 
 def sample_players():
     return [
-        {"name": "A", "position": "QB", "team": "X", "team_abbr": "XA", "value": 100, "rank": 1},
-        {"name": "B", "position": "RB", "team": "Y", "team_abbr": "YA", "value": 200, "rank": 2},
+        {
+            "name": "A", "position": "QB", "team": "X",
+            "team_abbr": "XA", "value": 100, "rank": 1
+        },
+        {
+            "name": "B", "position": "RB", "team": "Y",
+            "team_abbr": "YA", "value": 200, "rank": 2
+        },
     ]
 
 def sample_standings():

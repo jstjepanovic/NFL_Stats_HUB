@@ -1,13 +1,11 @@
-# Standard library imports
 import unittest
 import tempfile
 import os
 import json
 import csv
-import openpyxl
-from typing import Any, Dict, List
 
-# Local application imports
+import openpyxl
+
 from exporters import CSVDataExporter, JSONDataExporter, ExcelDataExporter
 
 class TestExporters(unittest.TestCase):
